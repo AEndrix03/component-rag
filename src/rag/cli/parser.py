@@ -6,6 +6,7 @@ from .commands.build import (
     cmd_cpm_build,
 )
 from .commands.query import cmd_query
+from .commands.lookup import cmd_cpm_lookup
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,5 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     cpm_build.add_argument("--version", default="0.0.0", help="Set the version for the context packet")
     add_common_build_args(cpm_build)
     cpm_build.set_defaults(func=cmd_cpm_build)
+
+    # cpm lookup (phase 0: show all)
+    cpm_lookup = cpm_sub.add_parser("lookup", help="List installed context packets (phase 0: show all)")
+    cpm_lookup.add_argument("--cpm_dir", default=".cpm", help="Folder containing extracted packets (default: .cpm)")
+    cpm_lookup.add_argument("--format", choices=["text", "jsonl"], default="text",
+                            help="Output format (default: text)")
+    cpm_lookup.set_defaults(func=cmd_cpm_lookup)
 
     return ap

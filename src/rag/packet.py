@@ -5,6 +5,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 from typing import List, Dict, Any, Iterable
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -17,10 +18,12 @@ from .faiss_db import FaissFlatIP
 CODE_EXTS = {".py", ".js", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".cpp", ".c", ".h", ".cs"}
 TEXT_EXTS = {".md", ".txt", ".rst"}
 
+
 def iter_source_files(root: Path) -> Iterable[Path]:
     for p in root.rglob("*"):
         if p.is_file() and p.suffix.lower() in (CODE_EXTS | TEXT_EXTS):
             yield p
+
 
 def read_text_file(p: Path) -> str:
     try:
@@ -28,10 +31,12 @@ def read_text_file(p: Path) -> str:
     except UnicodeDecodeError:
         return p.read_text(encoding="latin-1")
 
+
 def write_docs_jsonl(chunks: List[Chunk], out_path: Path) -> None:
     with out_path.open("w", encoding="utf-8") as f:
         for c in chunks:
             f.write(json.dumps({"id": c.id, "text": c.text, "metadata": c.metadata}, ensure_ascii=False) + "\n")
+
 
 def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
@@ -39,6 +44,7 @@ def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
         for chunk in iter(lambda: f.read(chunk_size), b""):
             h.update(chunk)
     return h.hexdigest()
+
 
 def _write_checksums(manifest: Dict[str, Any], out_root: Path) -> None:
     # checksum only large immutable artifacts (exclude manifest itself to avoid recursion)
@@ -54,6 +60,7 @@ def _write_checksums(manifest: Dict[str, Any], out_root: Path) -> None:
             rel = str(p.relative_to(out_root)).replace("\\", "/")
             checksums[rel] = {"algo": "sha256", "value": _sha256_file(p)}
     manifest["checksums"] = checksums
+
 
 def _archive_packet_dir(out_root: Path, archive_format: str = "tar.gz") -> Path:
     # produce out_root.<ext> next to the folder (npm-like tarball)
@@ -76,6 +83,84 @@ def _archive_packet_dir(out_root: Path, archive_format: str = "tar.gz") -> Path:
     return archive_path
 
 
+def _infer_tags_from_ext_counts(ext_counts: Dict[str, int]) -> List[str]:
+    """
+    euristica: se troviamo certi ext, mettiamo tags.
+    """
+    tags: List[str] = []
+
+    def has(ext: str) -> bool:
+        return ext_counts.get(ext, 0) > 0
+
+    # languages
+    if has(".py"):
+        tags.append("python")
+    if has(".js"):
+        tags.append("javascript")
+    if has(".ts") or has(".tsx"):
+        tags.append("typescript")
+    if has(".java"):
+        tags.append("java")
+    if has(".kt"):
+        tags.append("kotlin")
+    if has(".go"):
+        tags.append("go")
+    if has(".rs"):
+        tags.append("rust")
+    if has(".cpp") or has(".c") or has(".h"):
+        tags.append("cpp")
+    if has(".cs"):
+        tags.append("csharp")
+
+    # docs-ish
+    if has(".md") or has(".rst") or has(".txt"):
+        tags.append("docs")
+
+    # always tag as rag-component-ish
+    tags.append("cpm")
+    return sorted(set(tags))
+
+
+def _write_cpm_yml(
+    out_root: Path,
+    *,
+    name: str,
+    version: str,
+    description: str,
+    tags: List[str],
+    entrypoints: List[str],
+    embedding_model: str,
+    embedding_dim: int,
+    embedding_normalized: bool,
+) -> None:
+    """
+    YAML minimale (senza dipendenze). Valori sempre in forma semplice.
+    """
+    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def esc(v: str) -> str:
+        # stringa safe in YAML minimal: se contiene ":" o "#", mettiamo tra doppi apici
+        if any(ch in v for ch in [":", "#", "\n", "\r", "\t"]):
+            v = v.replace('"', '\\"')
+            return f"\"{v}\""
+        return v
+
+    cpm_yml_path = out_root / "cpm.yml"
+    with cpm_yml_path.open("w", encoding="utf-8") as f:
+        f.write(f"cpm_schema: 1\n")
+        f.write(f"name: {esc(name)}\n")
+        f.write(f"version: {esc(version)}\n")
+        f.write(f"description: {esc(description)}\n")
+        f.write(f"tags: {esc(','.join(tags))}\n")
+        f.write(f"entrypoints: {esc(','.join(entrypoints))}\n")
+        f.write(f"embedding_model: {esc(embedding_model)}\n")
+        f.write(f"embedding_dim: {int(embedding_dim)}\n")
+        f.write(f"embedding_normalized: {'true' if embedding_normalized else 'false'}\n")
+        f.write(f"created_at: {esc(created_at)}\n")
+
+    print(f"[write] cpm.yml -> {cpm_yml_path}")
+
+
 def build_packet(
     input_dir: str,
     packet_dir: str,
@@ -96,13 +181,6 @@ def build_packet(
     out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "faiss").mkdir(parents=True, exist_ok=True)
 
-    # Create cpm.yml
-    cpm_yml_path = out_root / "cpm.yml"
-    with cpm_yml_path.open("w", encoding="utf-8") as f:
-        f.write(f"cpm_version: {version}\n")
-        f.write(f"version: {version}\n")
-    print(f"[write] cpm.yml -> {cpm_yml_path}")
-
     # 1) scan + chunk
     chunks: List[Chunk] = []
     n_files = 0
@@ -110,11 +188,14 @@ def build_packet(
     exts = sorted(CODE_EXTS | TEXT_EXTS)
     print(f"[scan] indexing extensions: {exts}")
 
+    ext_counts: Dict[str, int] = {}
     for file_path in iter_source_files(in_root):
         n_files += 1
+        ext = file_path.suffix.lower()
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
         text = read_text_file(file_path)
         rel = str(file_path.relative_to(in_root)).replace("\\", "/")
-        ext = file_path.suffix.lower()
 
         router = ChunkerRouter()
         cfg = ChunkingConfig(
@@ -133,7 +214,7 @@ def build_packet(
 
         for c in file_chunks:
             c.metadata["path"] = rel
-            c.metadata["ext"] = file_path.suffix.lower()
+            c.metadata["ext"] = ext
         chunks.extend(file_chunks)
 
         if n_files <= 5:
@@ -176,6 +257,24 @@ def build_packet(
     vecs.astype("float16").tofile(str(vectors_path))
     print(f"[write] vectors.f16.bin -> {vectors_path}")
 
+    # 5.5) write cpm.yml (now that we know embedding dim)
+    tags = _infer_tags_from_ext_counts(ext_counts)
+    name = out_root.name
+    input_path = in_root.as_posix()
+    description = f"Auto-built from {input_path}"
+    entrypoints = ["query"]
+    _write_cpm_yml(
+        out_root,
+        name=name,
+        version=version,
+        description=description,
+        tags=tags,
+        entrypoints=entrypoints,
+        embedding_model=model_name,
+        embedding_dim=dim,
+        embedding_normalized=True,
+    )
+
     # 6) manifest
     manifest: Dict[str, Any] = {
         "schema_version": "1.0",
@@ -200,6 +299,16 @@ def build_packet(
             "calibration": None,
         },
         "counts": {"docs": len(chunks), "vectors": int(db.index.ntotal)},
+        "source": {
+            "input_dir": str(in_root).replace("\\", "/"),
+            "file_ext_counts": ext_counts,
+        },
+        "cpm": {
+            "name": name,
+            "version": version,
+            "tags": tags,
+            "entrypoints": entrypoints,
+        }
     }
     _write_checksums(manifest, out_root)
     manifest_path = out_root / "manifest.json"
