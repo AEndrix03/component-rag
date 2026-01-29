@@ -10,6 +10,12 @@ def _cmd_query(args):
     return cmd_query(args)
 
 
+def _cmd_mcp_serve(args):
+    # Avvio MCP server (stdio)
+    from ..mcp.server import main as mcp_main
+    return mcp_main()
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="rag")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -33,8 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     # cpm lookup
     cpm_lookup = cpm_sub.add_parser("lookup", help="List installed context packets (phase 0: show all)")
     cpm_lookup.add_argument("--cpm_dir", default=".cpm", help="Folder containing extracted packets (default: .cpm)")
-    cpm_lookup.add_argument("--format", choices=["text", "jsonl"], default="text",
-                            help="Output format (default: text)")
+    cpm_lookup.add_argument(
+        "--format",
+        choices=["text", "jsonl"],
+        default="text",
+        help="Output format (default: text)",
+    )
     cpm_lookup.set_defaults(func=cmd_cpm_lookup)
 
     # cpm query
@@ -45,4 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     cpm_query.add_argument("-k", type=int, default=5)
     cpm_query.set_defaults(func=_cmd_query)
 
+    # cpm mcp
+    cpm_mcp = cpm_sub.add_parser("mcp", help="Model Context Protocol (MCP) server for CPM")
+    cpm_mcp_sub = cpm_mcp.add_subparsers(dest="mcp_subcommand", required=True)
+
+    cpm_mcp_serve = cpm_mcp_sub.add_parser("serve", help="Start MCP server (stdio)")
+    cpm_mcp_serve.set_defaults(func=_cmd_mcp_serve)
+
     return ap
+
