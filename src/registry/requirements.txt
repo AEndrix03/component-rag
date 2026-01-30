@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+typer
+requests
+boto3
+python-multipart
+python-dotenv

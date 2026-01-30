@@ -88,14 +88,46 @@ def _extract_packet_info(packet_root: Path) -> Dict[str, Any]:
 
 
 def _iter_packet_dirs(cpm_dir: Path) -> List[Path]:
+    """
+    Supporta:
+      - legacy: .cpm/<name>/
+      - versioned: .cpm/<name>/<major>/<minor>/<patch>/
+    Ritorna i packet root reali (quelli che contengono manifest/cpm.yml/faiss).
+    """
     if not cpm_dir.exists() or not cpm_dir.is_dir():
         return []
+
     out: List[Path] = []
-    for p in sorted(cpm_dir.iterdir()):
-        if not p.is_dir():
+
+    def is_packet_root(p: Path) -> bool:
+        return (
+            (p / "manifest.json").exists()
+            or (p / "cpm.yml").exists()
+            or (p / "faiss" / "index.faiss").exists()
+        )
+
+    for name_dir in sorted(cpm_dir.iterdir()):
+        if not name_dir.is_dir():
             continue
-        if (p / "manifest.json").exists() or (p / "cpm.yml").exists() or (p / "faiss" / "index.faiss").exists():
-            out.append(p)
+
+        # legacy root
+        if is_packet_root(name_dir):
+            out.append(name_dir)
+            continue
+
+        # versioned: <name>/<major>/<minor>/<patch>
+        for major_dir in sorted(name_dir.iterdir()):
+            if not major_dir.is_dir() or not major_dir.name.isdigit():
+                continue
+            for minor_dir in sorted(major_dir.iterdir()):
+                if not minor_dir.is_dir() or not minor_dir.name.isdigit():
+                    continue
+                for patch_dir in sorted(minor_dir.iterdir()):
+                    if not patch_dir.is_dir() or not patch_dir.name.isdigit():
+                        continue
+                    if is_packet_root(patch_dir):
+                        out.append(patch_dir)
+
     return out
 
 
@@ -106,6 +138,7 @@ def cmd_cpm_lookup(args) -> None:
     if not packet_dirs:
         print(f"[cpm:lookup] No packets found in: {cpm_dir.resolve()}")
         print("            - expected folders like .cpm/<name>/manifest.json or .cpm/<name>/cpm.yml")
+        print("              or versioned folders like .cpm/<name>/<x>/<y>/<z>/manifest.json")
         return
 
     infos = [_extract_packet_info(p) for p in packet_dirs]

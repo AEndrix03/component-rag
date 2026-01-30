@@ -53,6 +53,19 @@ def build_parser() -> argparse.ArgumentParser:
     cpm_query.add_argument("--packet", required=True, help="Packet name (folder), or direct path to packet folder")
     cpm_query.add_argument("--query", required=True)
     cpm_query.add_argument("-k", type=int, default=5)
+
+    # cache flags (phase 0)
+    cpm_query.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable query cache (do not read or write .history)",
+    )
+    cpm_query.add_argument(
+        "--cache-refresh",
+        action="store_true",
+        help="Ignore cache hit and recompute results, overwriting cache",
+    )
+
     cpm_query.set_defaults(func=_cmd_query)
 
     # cpm mcp
@@ -63,4 +76,3 @@ def build_parser() -> argparse.ArgumentParser:
     cpm_mcp_serve.set_defaults(func=_cmd_mcp_serve)
 
     return ap
-

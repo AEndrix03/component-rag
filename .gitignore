@@ -5,3 +5,5 @@
 examples/
 components/
 **/__pycache__/**
+
+**/.env
