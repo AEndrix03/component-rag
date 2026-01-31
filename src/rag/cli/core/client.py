@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import requests
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class RegistryClient:
@@ -15,14 +18,26 @@ class RegistryClient:
         r = requests.head(self._url(f"/v1/packages/{name}/{version}"), timeout=10)
         return r.status_code == 200
 
-    def publish(self, name: str, version: str, file_path: str) -> dict:
+    def publish(self, name: str, version: str, file_path: str, overwrite: bool = False) -> dict:
         if not os.path.exists(file_path):
             raise FileNotFoundError(file_path)
+
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f, "application/gzip")}
-            r = requests.post(self._url(f"/v1/packages/{name}/{version}"), files=files, timeout=120)
+            params = {}
+            if overwrite:
+                params["overwrite"] = "true"
+
+            r = requests.post(
+                self._url(f"/v1/packages/{name}/{version}"),
+                files=files,
+                params=params,
+                timeout=120,
+            )
+
         if r.status_code >= 400:
             raise RuntimeError(f"publish failed: {r.status_code} {r.text}")
+
         return r.json()
 
     def download(self, name: str, version: str, out_path: str) -> str:

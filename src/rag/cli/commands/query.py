@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple, List
 import faiss
 
 from ...embedding.http_embedder import HttpEmbedder
-
+from ..core.cpm_pkg import resolve_current_packet_dir
 
 def load_docs(docs_path: Path):
     docs = []
@@ -173,7 +173,7 @@ def _print_results(header: str, query: str, k: int, packet_name: str, results: L
 
 def cmd_query(args) -> None:
     cpm_dir = Path(args.cpm_dir)
-    packet_dir = _resolve_packet_dir(cpm_dir, args.packet)
+    packet_dir = resolve_current_packet_dir(cpm_dir, args.packet)
 
     if packet_dir is None:
         tried = (cpm_dir / args.packet).resolve()

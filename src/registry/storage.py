@@ -70,3 +70,20 @@ class S3Storage:
             raise RuntimeError(
                 f"Failed to create bucket '{self.bucket}': {error.get('Code')} {error.get('Message')}"
             ) from e
+
+    def head(self, key: str) -> dict | None:
+        try:
+            response = self.client.head_object(Bucket=self.bucket, Key=key)
+            return response
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                return None
+            raise
+
+    def put_bytes(self, key: str, data: bytes, content_type: str) -> None:
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+        )

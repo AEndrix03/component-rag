@@ -1,3 +1,4 @@
+# rag/cli/parser.py
 import argparse
 
 from .commands.build import add_common_build_args, cmd_cpm_build
@@ -5,13 +6,11 @@ from .commands.lookup import cmd_cpm_lookup
 
 
 def _cmd_query(args):
-    # Lazy import: query (e quindi HttpEmbedder/faiss) solo quando serve
     from .commands.query import cmd_query
     return cmd_query(args)
 
 
 def _cmd_mcp_serve(args):
-    # Avvio MCP server (stdio)
     from ..mcp.server import main as mcp_main
     return mcp_main()
 
@@ -20,15 +19,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="rag")
     sub = ap.add_subparsers(dest="command", required=True)
 
-    # CPM commands (single entrypoint)
     cpm = sub.add_parser("cpm", help="Context packet manager")
     cpm_sub = cpm.add_subparsers(dest="subcommand", required=True)
 
-    # cpm embed
+    # embed
     from .commands.embed import add_cpm_embed_commands
     add_cpm_embed_commands(cpm_sub)
 
-    # cpm build
+    # build
     cpm_build = cpm_sub.add_parser("build", help="Build a context packet")
     cpm_build.add_argument("--dir", default=".")
     cpm_build.add_argument("--out", default=".")
@@ -36,42 +34,97 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_build_args(cpm_build)
     cpm_build.set_defaults(func=cmd_cpm_build)
 
-    # cpm lookup
-    cpm_lookup = cpm_sub.add_parser("lookup", help="List installed context packets (phase 0: show all)")
-    cpm_lookup.add_argument("--cpm_dir", default=".cpm", help="Folder containing extracted packets (default: .cpm)")
-    cpm_lookup.add_argument(
-        "--format",
-        choices=["text", "jsonl"],
-        default="text",
-        help="Output format (default: text)",
-    )
+    # lookup (local)
+    cpm_lookup = cpm_sub.add_parser("lookup", help="List installed context packets")
+    cpm_lookup.add_argument("--cpm_dir", default=".cpm")
+    cpm_lookup.add_argument("--format", choices=["text", "jsonl"], default="text")
+    cpm_lookup.add_argument("--all-versions", action="store_true",
+                            help="Show all installed versions (default: current only)")
     cpm_lookup.set_defaults(func=cmd_cpm_lookup)
 
-    # cpm query
+    # query
     cpm_query = cpm_sub.add_parser("query", help="Query an installed packet by name/path under .cpm/")
-    cpm_query.add_argument("--cpm_dir", default=".cpm", help="Folder containing extracted packets (default: .cpm)")
+    cpm_query.add_argument("--cpm_dir", default=".cpm")
     cpm_query.add_argument("--packet", required=True, help="Packet name (folder), or direct path to packet folder")
     cpm_query.add_argument("--query", required=True)
     cpm_query.add_argument("-k", type=int, default=5)
-
-    # cache flags (phase 0)
-    cpm_query.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="Disable query cache (do not read or write .history)",
-    )
-    cpm_query.add_argument(
-        "--cache-refresh",
-        action="store_true",
-        help="Ignore cache hit and recompute results, overwriting cache",
-    )
-
+    cpm_query.add_argument("--no-cache", action="store_true")
+    cpm_query.add_argument("--cache-refresh", action="store_true")
     cpm_query.set_defaults(func=_cmd_query)
 
-    # cpm mcp
+    # publish
+    from .commands.publish import cmd_cpm_publish
+    cpm_pub = cpm_sub.add_parser("publish", help="Publish a built packet to a registry")
+    cpm_pub.add_argument("--from", dest="from_dir", default=".", help="Built packet directory (default: .)")
+    cpm_pub.add_argument("--registry", required=True, help="Registry base url (e.g. http://127.0.0.1:8786)")
+    cpm_pub.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite package if it already exists on registry (asks confirmation)",
+    )
+    cpm_pub.set_defaults(func=cmd_cpm_publish)
+
+    # install
+    from .commands.install import cmd_cpm_install
+    cpm_ins = cpm_sub.add_parser("install", help="Install packet from registry into .cpm/")
+    cpm_ins.add_argument("spec", help="name@x.y.z")
+    cpm_ins.add_argument("--registry", required=True)
+    cpm_ins.add_argument("--cpm_dir", default=".cpm")
+    cpm_ins.set_defaults(func=cmd_cpm_install)
+
+    # uninstall
+    from .commands.uninstall import cmd_cpm_uninstall
+    cpm_un = cpm_sub.add_parser("uninstall", help="Uninstall a packet or a specific version")
+    cpm_un.add_argument("spec", help="name or name@x.y.z")
+    cpm_un.add_argument("--cpm_dir", default=".cpm")
+    cpm_un.set_defaults(func=cmd_cpm_uninstall)
+
+    # update
+    from .commands.update import cmd_cpm_update
+    cpm_up = cpm_sub.add_parser("update", help="Update an installed packet (optionally to a target version)")
+    cpm_up.add_argument("spec", help="name or name@x.y.z (if missing version, takes registry latest)")
+    cpm_up.add_argument("--registry", required=True)
+    cpm_up.add_argument("--cpm_dir", default=".cpm")
+    cpm_up.add_argument("--purge", action="store_true", help="Remove packet then install version fresh")
+    cpm_up.set_defaults(func=cmd_cpm_update)
+
+    # use (pin)
+    from .commands.use import cmd_cpm_use
+    cpm_use = cpm_sub.add_parser("use", help="Switch current version (pin) without downloading")
+    cpm_use.add_argument("spec", help="name@x.y.z")
+    cpm_use.add_argument("--cpm_dir", default=".cpm")
+    cpm_use.set_defaults(func=cmd_cpm_use)
+
+    # list-remote
+    from .commands.list_remote import cmd_cpm_list_remote
+    cpm_lr = cpm_sub.add_parser("list-remote", help="List versions available on registry")
+    cpm_lr.add_argument("name")
+    cpm_lr.add_argument("--registry", required=True)
+    cpm_lr.add_argument("--include-yanked", action="store_true")
+    cpm_lr.add_argument("--format", choices=["text", "json"], default="text")
+    cpm_lr.set_defaults(func=cmd_cpm_list_remote)
+
+    # prune
+    from .commands.prune import cmd_cpm_prune
+    cpm_pr = cpm_sub.add_parser("prune", help="Remove old local versions, keep N latest")
+    cpm_pr.add_argument("name")
+    cpm_pr.add_argument("--keep", type=int, default=1)
+    cpm_pr.add_argument("--cpm_dir", default=".cpm")
+    cpm_pr.set_defaults(func=cmd_cpm_prune)
+
+    # cache clear
+    from .commands.cache import cmd_cpm_cache_clear
+    cpm_cache = cpm_sub.add_parser("cache", help="Cache management")
+    cpm_cache_sub = cpm_cache.add_subparsers(dest="cache_cmd", required=True)
+
+    cpm_cache_clear = cpm_cache_sub.add_parser("clear", help="Clear query cache for current version of a packet")
+    cpm_cache_clear.add_argument("--cpm_dir", default=".cpm")
+    cpm_cache_clear.add_argument("--packet", required=True)
+    cpm_cache_clear.set_defaults(func=cmd_cpm_cache_clear)
+
+    # mcp
     cpm_mcp = cpm_sub.add_parser("mcp", help="Model Context Protocol (MCP) server for CPM")
     cpm_mcp_sub = cpm_mcp.add_subparsers(dest="mcp_subcommand", required=True)
-
     cpm_mcp_serve = cpm_mcp_sub.add_parser("serve", help="Start MCP server (stdio)")
     cpm_mcp_serve.set_defaults(func=_cmd_mcp_serve)
 

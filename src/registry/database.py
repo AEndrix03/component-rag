@@ -189,3 +189,19 @@ class RegistryDB:
             )
             conn.commit()
             return cur.rowcount > 0
+
+    def delete_version(self, name: str, version: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM versions
+                WHERE id IN (
+                    SELECT v.id
+                    FROM versions v
+                    JOIN packages p ON p.id = v.package_id
+                    WHERE p.name = ? AND v.version = ?
+                )
+                """,
+                (name, version),
+            )
+            conn.commit()

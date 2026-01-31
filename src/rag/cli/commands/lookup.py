@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
+from ..core.cpm_pkg import get_pinned_version, installed_versions, max_semver, version_dir
+
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
     try:
@@ -133,37 +135,33 @@ def _iter_packet_dirs(cpm_dir: Path) -> List[Path]:
 
 def cmd_cpm_lookup(args) -> None:
     cpm_dir = Path(args.cpm_dir)
-    packet_dirs = _iter_packet_dirs(cpm_dir)
+
+    if getattr(args, "all_versions", False):
+        packet_dirs = _iter_packet_dirs(cpm_dir)
+    else:
+        # current only: per name_dir scegli pinned o latest
+        packet_dirs = []
+        if cpm_dir.exists():
+            for name_dir in sorted(cpm_dir.iterdir()):
+                if not name_dir.is_dir():
+                    continue
+                name = name_dir.name
+                pinned = get_pinned_version(cpm_dir, name)
+                if pinned:
+                    vd = version_dir(cpm_dir, name, pinned)
+                    if vd.exists():
+                        packet_dirs.append(vd)
+                        continue
+                vs = installed_versions(cpm_dir, name)
+                best = max_semver(vs) if vs else None
+                if best:
+                    vd = version_dir(cpm_dir, name, best)
+                    if vd.exists():
+                        packet_dirs.append(vd)
 
     if not packet_dirs:
         print(f"[cpm:lookup] No packets found in: {cpm_dir.resolve()}")
-        print("            - expected folders like .cpm/<name>/manifest.json or .cpm/<name>/cpm.yml")
-        print("              or versioned folders like .cpm/<name>/<x>/<y>/<z>/manifest.json")
         return
 
     infos = [_extract_packet_info(p) for p in packet_dirs]
-
-    if args.format == "jsonl":
-        for it in infos:
-            print(json.dumps(it, ensure_ascii=False))
-        return
-
-    print(f"[cpm:lookup] packets={len(infos)} root={cpm_dir.resolve()}")
-    for it in infos:
-        name = it.get("name")
-        version = it.get("version")
-        docs = it.get("docs")
-        model = it.get("embedding_model")
-        dim = it.get("embedding_dim")
-        eps = ",".join(it.get("entrypoints") or [])
-        tags = ",".join(it.get("tags") or [])
-        has_faiss = "yes" if it.get("has_faiss") else "no"
-
-        print(f"- {name}  v={version}  docs={docs}  emb={model}({dim})  faiss={has_faiss}")
-        if eps:
-            print(f"  entrypoints={eps}")
-        if tags:
-            print(f"  tags={tags}")
-        if it.get("description"):
-            print(f"  desc={it['description']}")
-        print(f"  path={it.get('path')}")
+    ...

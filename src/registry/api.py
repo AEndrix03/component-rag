@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse, Response
+from botocore.exceptions import ClientError
 
 from .settings import RegistrySettings
 from .database import RegistryDB
 from .storage import S3Storage
+
+log = logging.getLogger(__name__)
 
 
 def object_key_for_sha256(sha256: str) -> str:
@@ -61,10 +65,20 @@ def make_app(settings: RegistrySettings) -> FastAPI:
         return {"name": name, "versions": versions}
 
     @app.post("/v1/packages/{name}/{version}")
-    async def publish(name: str, version: str, request: Request, file: UploadFile = File(...)):
+    async def publish(
+            name: str,
+            version: str,
+            request: Request,
+            file: UploadFile = File(...),
+            overwrite: bool = False,
+    ):
+
         # check if already exists (avoid overwrite)
         if db.exists(name, version):
-            raise HTTPException(status_code=409, detail="already exists")
+            if not overwrite:
+                raise HTTPException(status_code=409, detail="already exists")
+            # overwrite requested → delete previous mapping
+            db.delete_version(name, version)
 
         data = await file.read()
         if not data:
@@ -75,7 +89,11 @@ def make_app(settings: RegistrySettings) -> FastAPI:
 
         # upload to S3 (dedup: if already there, ok)
         if storage.head(key) is None:
-            storage.put_bytes(key, data, content_type="application/gzip")
+            try:
+                storage.put_bytes(key, data, content_type="application/gzip")
+            except ClientError as e:
+                log.error(f"S3 upload failed: {e}")
+                raise HTTPException(status_code=500, detail="S3 upload failed")
 
         # insert db mapping
         db.insert_version(
