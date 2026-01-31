@@ -1,29 +1,32 @@
-# rag/cli/commands/uninstall.py
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
 
 from ..core.cpm_pkg import (
-    parse_semver,
+    RegistryClient,
+    normalize_latest,
+    registry_latest_version,
     installed_versions,
-    max_semver,
+    version_key,
     packet_root,
     version_dir,
     set_pinned_version,
 )
 
+
 def _parse_spec_optional(spec: str) -> tuple[str, str | None]:
+    spec = (spec or "").strip()
+    if not spec:
+        raise SystemExit("[cpm:uninstall] missing spec")
     if "@" not in spec:
-        return spec.strip(), None
+        return spec, None
     name, version = spec.split("@", 1)
     name = name.strip()
-    version = version.strip()
+    version = normalize_latest(version)
     if not name:
         raise SystemExit("[cpm:uninstall] missing name")
-    if version:
-        parse_semver(version)
-    return name, (version or None)
+    return name, version
 
 
 def cmd_cpm_uninstall(args) -> None:
@@ -34,10 +37,20 @@ def cmd_cpm_uninstall(args) -> None:
     if not root.exists():
         raise SystemExit(f"[cpm:uninstall] not installed: {name}")
 
+    # No version => remove all
     if version is None:
         shutil.rmtree(root, ignore_errors=True)
         print(f"[cpm:uninstall] removed {name} (all versions)")
         return
+
+    # latest => resolve from registry
+    if version == "latest":
+        registry = (getattr(args, "registry", "") or "").rstrip("/")
+        if not registry:
+            raise SystemExit("[cpm:uninstall] @latest requires --registry")
+        client = RegistryClient(registry)
+        version = registry_latest_version(client, name)
+        print(f"[cpm:uninstall] resolved latest: {name}@{version}")
 
     vd = version_dir(cpm_dir, name, version)
     if not vd.exists():
@@ -51,7 +64,6 @@ def cmd_cpm_uninstall(args) -> None:
         print(f"[cpm:uninstall] removed {name}@{version} (no versions left, removed packet)")
         return
 
-    new_pin = max_semver(remaining)
-    if new_pin:
-        set_pinned_version(cpm_dir, name, new_pin)
+    new_pin = max(remaining, key=version_key)
+    set_pinned_version(cpm_dir, name, new_pin)
     print(f"[cpm:uninstall] removed {name}@{version}; current={new_pin}")

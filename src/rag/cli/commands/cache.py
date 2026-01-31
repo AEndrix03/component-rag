@@ -1,10 +1,10 @@
-# rag/cli/commands/cache.py
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
 
 from ..core.cpm_pkg import resolve_current_packet_dir
+
 
 def cmd_cpm_cache_clear(args) -> None:
     cpm_dir = Path(args.cpm_dir or ".cpm").resolve()

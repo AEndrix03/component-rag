@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
-import requests
 import logging
+import os
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -22,18 +23,13 @@ class RegistryClient:
         if not os.path.exists(file_path):
             raise FileNotFoundError(file_path)
 
+        params = {"overwrite": "true"} if overwrite else None
+
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f, "application/gzip")}
-            params = {}
-            if overwrite:
-                params["overwrite"] = "true"
-
-            r = requests.post(
-                self._url(f"/v1/packages/{name}/{version}"),
-                files=files,
-                params=params,
-                timeout=120,
-            )
+            url = self._url(f"/v1/packages/{name}/{version}")
+            log.info(f"Publishing to {url} overwrite={overwrite}")
+            r = requests.post(url, files=files, params=params, timeout=120)
 
         if r.status_code >= 400:
             raise RuntimeError(f"publish failed: {r.status_code} {r.text}")
@@ -53,7 +49,11 @@ class RegistryClient:
         return out_path
 
     def list(self, name: str, include_yanked: bool = False) -> dict:
-        r = requests.get(self._url(f"/v1/packages/{name}"), params={"include_yanked": str(include_yanked).lower()}, timeout=10)
+        r = requests.get(
+            self._url(f"/v1/packages/{name}"),
+            params={"include_yanked": str(include_yanked).lower()},
+            timeout=10,
+        )
         if r.status_code >= 400:
             raise RuntimeError(f"list failed: {r.status_code} {r.text}")
         return r.json()

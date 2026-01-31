@@ -87,3 +87,7 @@ class S3Storage:
             Body=data,
             ContentType=content_type,
         )
+
+    def get_streaming_body(self, key: str):
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response['Body']

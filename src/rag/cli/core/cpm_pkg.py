@@ -1,54 +1,310 @@
-# rag/cli/commands/cpm_pkg.py
 from __future__ import annotations
 
 import os
 import re
-import json
 import shutil
 import tarfile
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Iterable
+from typing import Dict, List, Optional, Tuple, Any
 
-# Reuse existing RegistryClient (from registry package)
-from .client import RegistryClient  # :contentReference[oaicite:3]{index=3}
-
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+from .client import RegistryClient
 
 
-# ----------------------------
-# Semver helpers
-# ----------------------------
-def parse_semver(v: str) -> Tuple[int, int, int]:
-    m = _SEMVER_RE.match((v or "").strip())
-    if not m:
-        raise ValueError(f"invalid semver: {v!r} (expected x.y.z)")
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+# ============================================================
+# Version handling (flexible + strong ordering)
+# ============================================================
+
+def _safe_segment(seg: str) -> str:
+    """
+    Make a single path segment safe (no remap).
+    - no slashes/backslashes
+    - keep readable
+    """
+    s = (seg or "").strip()
+    if not s:
+        return ""
+    s = s.replace("\\", "/").replace("/", "-")
+    # Do NOT change dots here; dots are separators at version split stage
+    s = re.sub(r"[^a-zA-Z0-9._\-+@]+", "-", s).strip("-")
+    return s
 
 
-def semver_to_path(v: str) -> Tuple[str, str, str]:
-    x, y, z = parse_semver(v)
-    return str(x), str(y), str(z)
+def split_version_parts(version: str) -> List[str]:
+    """
+    Split version string into path parts by '.' (no remap).
+    Examples:
+      - "0.1.2.5-beta.4.5" => ["0","1","2","5-beta","4","5"]
+      - "1" => ["1"]
+    """
+    v = (version or "").strip()
+    if not v:
+        raise ValueError("empty version")
+    raw = v.split(".")
+    parts = [_safe_segment(p) for p in raw if p is not None and p != ""]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise ValueError(f"invalid version after sanitization: {version!r}")
+    return parts
 
 
-def max_semver(versions: Iterable[str]) -> Optional[str]:
-    best: Optional[Tuple[int, int, int]] = None
-    best_s: Optional[str] = None
-    for s in versions:
-        try:
-            t = parse_semver(s)
-        except Exception:
+def normalize_latest(version: Optional[str]) -> Optional[str]:
+    if version is None:
+        return None
+    v = version.strip()
+    if not v:
+        return None
+    if v.lower() == "latest":
+        return "latest"
+    return v
+
+
+# ---- precedence model (lower = earlier/less stable) ----
+# You can extend this list anytime.
+_STAGE_ORDER = {
+    "dev": 0,
+    "snapshot": 0,
+    "nightly": 0,
+
+    "a": 10,
+    "alpha": 10,
+
+    "b": 20,
+    "beta": 20,
+
+    "pre": 30,
+    "preview": 30,
+
+    "rc": 40,
+    "candidate": 40,
+
+    # "stable/final" are "no prerelease" ideally, but allow explicit tags:
+    "stable": 90,
+    "release": 90,
+    "ga": 90,
+
+    "final": 100,
+}
+
+
+# If you want to treat explicit "latest" tag inside version (rare) as highest, enable:
+# But generally "@latest" is the alias, not a tag inside version.
+# _STAGE_ORDER["latest"] = 1000
+
+
+def _split_segment_tokens(seg: str) -> Tuple[str, List[str]]:
+    """
+    Split a segment into base + qualifiers by '-'.
+      "5-beta-2" => base="5", qualifiers=["beta","2"]
+      "rc1"      => base="rc1", qualifiers=[]  (handled later)
+    """
+    s = (seg or "").strip()
+    if "-" not in s:
+        return s, []
+    parts = [p for p in s.split("-") if p != ""]
+    if not parts:
+        return s, []
+    return parts[0], parts[1:]
+
+
+def _tokenize_text_and_int(s: str) -> List[Any]:
+    """
+    Tokenize a string into a list of (type, value) where type 0=int, 1=str.
+    Examples:
+      "rc10" -> [ (1,"rc"), (0,10) ]
+      "beta2"-> [ (1,"beta"), (0,2) ]
+      "foo"  -> [ (1,"foo") ]
+      "12"   -> [ (0,12) ]
+    """
+    s = (s or "").strip()
+    if not s:
+        return []
+    out: List[Any] = []
+    i = 0
+    while i < len(s):
+        if s[i].isdigit():
+            j = i
+            while j < len(s) and s[j].isdigit():
+                j += 1
+            out.append((0, int(s[i:j])))
+            i = j
+        else:
+            j = i
+            while j < len(s) and not s[j].isdigit():
+                j += 1
+            out.append((1, s[i:j].lower()))
+            i = j
+    return out
+
+
+def _qualifier_stage_and_num(tokens: List[str]) -> Tuple[int, int, Tuple]:
+    """
+    Convert qualifier tokens into a comparable triple:
+      - stage_rank (bigger = more stable)
+      - stage_num (bigger = later within same stage)
+      - extra tokens (fallback)
+    Rules:
+      - no qualifiers => treat as implicit stable/final (highest) => stage_rank=1000
+      - first textual token in qualifiers decides stage if known
+      - numeric tokens after stage increase stage_num
+      - unknown text tokens: treated as stage_rank=50 (mid), but ordered lexicographically
+    """
+    if not tokens:
+        # No prerelease => highest
+        return (1000, 0, ())
+
+    # flatten tokens (including rc10 etc)
+    flat: List[Any] = []
+    for t in tokens:
+        flat.extend(_tokenize_text_and_int(t))
+
+    stage_rank = None
+    stage_num = 0
+    extra: List[Any] = []
+
+    # find first stage token (string)
+    for typ, val in flat:
+        if typ == 1:
+            if val in _STAGE_ORDER:
+                stage_rank = _STAGE_ORDER[val]
+                continue
+            # allow rc10 style: val might be "rc" already from tokenizer
+            # if unknown, keep as extra
+            extra.append((typ, val))
+        else:
+            # ints that appear before stage are treated as extra
+            extra.append((typ, val))
+
+        if stage_rank is not None:
+            break
+
+    if stage_rank is None:
+        # unknown prerelease => place between rc and stable-ish
+        stage_rank = 50
+
+    # stage_num: sum of ints in flat after we have a stage
+    seen_stage = False
+    for typ, val in flat:
+        if typ == 1 and val in _STAGE_ORDER and not seen_stage:
+            seen_stage = True
             continue
-        if best is None or t > best:
-            best = t
-            best_s = s
-    return best_s
+        if seen_stage and typ == 0:
+            stage_num = val
+            break
+
+    # remaining tokens become extra ordering
+    # (so beta.1 < beta.2, and beta.2-foo is deterministic)
+    return (stage_rank, stage_num, tuple(extra))
 
 
-# ----------------------------
-# Minimal YAML (same style you already use)
-# ----------------------------
+def _cmp_tokens(a: List[Any], b: List[Any]) -> int:
+    """
+    Compare lists of (type,value) tokens.
+    int tokens compare numerically; str tokens lexicographically.
+    int tokens considered > str tokens at same position.
+    """
+    la, lb = len(a), len(b)
+    n = max(la, lb)
+    for i in range(n):
+        if i >= la:
+            return -1
+        if i >= lb:
+            return 1
+        ta, va = a[i]
+        tb, vb = b[i]
+        if ta != tb:
+            # int (0) > str (1)
+            return 1 if ta < tb else -1
+        if va == vb:
+            continue
+        return 1 if va > vb else -1
+    return 0
+
+
+def compare_versions(a: str, b: str) -> int:
+    """
+    Strong-ish ordering:
+    - compare by dot segments, left->right
+    - each segment: compare base tokens (ints/strings)
+    - then compare prerelease qualifiers:
+        no qualifier > stable/final tags > rc > beta > alpha > dev
+    - if equal so far: longer version (more segments) is considered greater
+    """
+    aa = (a or "").strip()
+    bb = (b or "").strip()
+    if aa == bb:
+        return 0
+
+    seg_a = [s for s in aa.split(".") if s != ""]
+    seg_b = [s for s in bb.split(".") if s != ""]
+
+    n = max(len(seg_a), len(seg_b))
+    for i in range(n):
+        if i >= len(seg_a):
+            return -1
+        if i >= len(seg_b):
+            return 1
+
+        sa = seg_a[i]
+        sb = seg_b[i]
+
+        base_a, qual_a = _split_segment_tokens(sa)
+        base_b, qual_b = _split_segment_tokens(sb)
+
+        tok_a = _tokenize_text_and_int(base_a)
+        tok_b = _tokenize_text_and_int(base_b)
+
+        c = _cmp_tokens(tok_a, tok_b)
+        if c != 0:
+            return c
+
+        # base equal -> compare qualifier stability
+        stage_a = _qualifier_stage_and_num(qual_a)
+        stage_b = _qualifier_stage_and_num(qual_b)
+        if stage_a != stage_b:
+            return 1 if stage_a > stage_b else -1
+
+    # all segments equal length-wise and content-wise
+    # if same segments count already handled; otherwise handled above
+    return 0
+
+
+def version_key(v: str):
+    # Python key: use tuple of comparable objects by normalizing compare into key
+    # We can't directly use compare function as key; so we build a deterministic key.
+    # We'll map each segment into tokens.
+    v = (v or "").strip()
+    segs = [s for s in v.split(".") if s != ""]
+    out = []
+    for seg in segs:
+        base, qual = _split_segment_tokens(seg)
+        base_tokens = _tokenize_text_and_int(base)
+        stage_rank, stage_num, extra = _qualifier_stage_and_num(qual)
+        # Note: higher is better, so keep stage_rank/stage_num as is
+        out.append((base_tokens, stage_rank, stage_num, extra))
+    return tuple(out)
+
+
+def registry_latest_version(client: RegistryClient, name: str) -> str:
+    """
+    Latest = max by semantic ordering (NOT by published_at).
+    """
+    data = client.list(name, include_yanked=False)
+    versions = data.get("versions") or []
+    if not versions:
+        raise RuntimeError(f"no versions found on registry for {name}")
+
+    vs = [str(v.get("version")) for v in versions if v.get("version")]
+    if not vs:
+        raise RuntimeError(f"no valid versions found on registry for {name}")
+
+    return max(vs, key=version_key)
+
+
+# ============================================================
+# Minimal YAML (key: value)
+# ============================================================
+
 def read_simple_yml(path: Path) -> Dict[str, str]:
     out: Dict[str, str] = {}
     try:
@@ -74,12 +330,10 @@ def read_simple_yml(path: Path) -> Dict[str, str]:
 
 def write_simple_yml(path: Path, kv: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    # stable order (nice diffs)
     keys = sorted(kv.keys())
     lines = []
     for k in keys:
         v = kv[k]
-        # quote if needed
         if any(ch in v for ch in [":", "#", "\n", "\r", "\t"]):
             v = v.replace('"', '\\"')
             v = f"\"{v}\""
@@ -87,9 +341,10 @@ def write_simple_yml(path: Path, kv: Dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-# ----------------------------
-# Layout helpers
-# ----------------------------
+# ============================================================
+# CPM layout helpers
+# ============================================================
+
 REQUIRED_ARTIFACTS = [
     "manifest.json",
     "vectors.f16.bin",
@@ -114,8 +369,8 @@ def read_built_meta(src_dir: Path) -> Tuple[str, str]:
     version = (yml.get("version") or "").strip()
     if not name or not version:
         raise ValueError("cpm.yml missing required fields: name, version")
-    # validate semver here (your system uses x.y.z paths)
-    parse_semver(version)
+    # validate only for non-empty and path-splittable
+    split_version_parts(version)
     return name, version
 
 
@@ -124,64 +379,61 @@ def packet_root(cpm_dir: Path, name: str) -> Path:
 
 
 def packet_pin_path(cpm_dir: Path, name: str) -> Path:
-    # packet-level pin file: .cpm/<name>/cpm.yml
     return packet_root(cpm_dir, name) / "cpm.yml"
 
 
 def version_dir(cpm_dir: Path, name: str, version: str) -> Path:
-    x, y, z = semver_to_path(version)
-    return packet_root(cpm_dir, name) / x / y / z
-
-
-def installed_versions(cpm_dir: Path, name: str) -> List[str]:
-    root = packet_root(cpm_dir, name)
-    if not root.exists():
-        return []
-    out: List[str] = []
-    for major in root.iterdir():
-        if not major.is_dir() or not major.name.isdigit():
-            continue
-        for minor in major.iterdir():
-            if not minor.is_dir() or not minor.name.isdigit():
-                continue
-            for patch in minor.iterdir():
-                if not patch.is_dir() or not patch.name.isdigit():
-                    continue
-                # consider installed if it has manifest or faiss
-                if (patch / "manifest.json").exists() or (patch / "faiss" / "index.faiss").exists():
-                    out.append(f"{int(major.name)}.{int(minor.name)}.{int(patch.name)}")
-    return sorted(out, key=lambda s: parse_semver(s))
+    parts = split_version_parts(version)
+    return packet_root(cpm_dir, name).joinpath(*parts)
 
 
 def get_pinned_version(cpm_dir: Path, name: str) -> Optional[str]:
     yml = read_simple_yml(packet_pin_path(cpm_dir, name))
     v = (yml.get("version") or "").strip()
-    if not v:
-        return None
-    try:
-        parse_semver(v)
-    except Exception:
-        return None
-    return v
+    return v or None
 
 
 def set_pinned_version(cpm_dir: Path, name: str, version: str) -> None:
-    parse_semver(version)
+    split_version_parts(version)
     pin = packet_pin_path(cpm_dir, name)
     kv = read_simple_yml(pin)
+    kv["name"] = name
     kv["version"] = version
-    # optional convenience fields
-    if "name" not in kv:
-        kv["name"] = name
     write_simple_yml(pin, kv)
+
+
+def _looks_like_version_dir(p: Path) -> bool:
+    return (p / "manifest.json").exists() or (p / "faiss" / "index.faiss").exists()
+
+
+def installed_versions(cpm_dir: Path, name: str) -> List[str]:
+    """
+    Return installed versions by reading version from each version dir's cpm.yml.
+    """
+    root = packet_root(cpm_dir, name)
+    if not root.exists():
+        return []
+
+    found: List[str] = []
+    for p in root.rglob("cpm.yml"):
+        vd = p.parent
+        if not _looks_like_version_dir(vd):
+            continue
+        meta = read_simple_yml(p)
+        v = (meta.get("version") or "").strip()
+        if v:
+            found.append(v)
+
+    # unique + sort by semantic key
+    return sorted(set(found), key=version_key)
 
 
 def resolve_current_packet_dir(cpm_dir: Path, packet: str) -> Optional[Path]:
     """
     Resolve packet argument:
-      - direct path (if points to version dir with artifacts)
-      - name (use .cpm/<name>/cpm.yml 'version' if present)
-      - fallback: max installed version (legacy behavior)
+      - direct path => used as-is
+      - name => use .cpm/<name>/cpm.yml 'version' if present
+      - fallback => pick max among installed versions (semantic max)
     """
     p = Path(packet)
     if p.exists() and p.is_dir():
@@ -194,24 +446,19 @@ def resolve_current_packet_dir(cpm_dir: Path, packet: str) -> Optional[Path]:
         if vd.exists():
             return vd
 
-    # fallback to latest installed
     vs = installed_versions(cpm_dir, name)
     if not vs:
         return None
-    best = max_semver(vs)
-    if not best:
-        return None
+    best = max(vs, key=version_key)
     vd = version_dir(cpm_dir, name, best)
     return vd if vd.exists() else None
 
 
-# ----------------------------
+# ============================================================
 # Tar helpers (publish/install)
-# ----------------------------
+# ============================================================
+
 def _safe_tar_extract(tf: tarfile.TarFile, dest: Path) -> None:
-    """
-    Prevent path traversal. Only allow members under dest.
-    """
     dest = dest.resolve()
     for m in tf.getmembers():
         target = (dest / m.name).resolve()
@@ -223,32 +470,30 @@ def _safe_tar_extract(tf: tarfile.TarFile, dest: Path) -> None:
 def make_versioned_tar_from_build_dir(src_dir: Path, name: str, version: str, out_path: Path) -> None:
     """
     Create tar.gz with layout:
-      <name>/<x>/<y>/<z>/... (contents copied from src_dir)
+      <name>/<version_parts...>/...  (version parts are split by '.')
     """
-    x, y, z = semver_to_path(version)
+    parts = split_version_parts(version)
 
     if out_path.exists():
         out_path.unlink()
 
     with tempfile.TemporaryDirectory(prefix="cpm-publish-") as tmpd:
         tmp = Path(tmpd)
-        root = tmp / name / x / y / z
-        root.mkdir(parents=True, exist_ok=True)
+        root = tmp / name
+        ver_root = root.joinpath(*parts)
+        ver_root.mkdir(parents=True, exist_ok=True)
 
-        # Copy ALL files/dirs from src_dir into version dir
-        # (exclude any prebuilt archives next to it to avoid recursion)
         for p in src_dir.iterdir():
             if p.is_file() and p.name.endswith((".tar.gz", ".zip")):
                 continue
-            dst = root / p.name
+            dst = ver_root / p.name
             if p.is_dir():
                 shutil.copytree(p, dst)
             else:
                 shutil.copy2(p, dst)
 
-        # Create tar with top-level <name>
         with tarfile.open(out_path, "w:gz") as tf:
-            tf.add(tmp / name, arcname=name)
+            tf.add(root, arcname=name)
 
 
 def download_and_extract(client: RegistryClient, name: str, version: str, cpm_dir: Path) -> Path:
@@ -263,14 +508,4 @@ def download_and_extract(client: RegistryClient, name: str, version: str, cpm_di
         with tarfile.open(tar_path, "r:gz") as tf:
             _safe_tar_extract(tf, cpm_dir)
 
-    vd = version_dir(cpm_dir, name, version)
-    return vd
-
-
-def registry_latest_version(client: RegistryClient, name: str) -> str:
-    data = client.list(name, include_yanked=False)
-    versions = data.get("versions") or []
-    if not versions:
-        raise RuntimeError(f"no versions found on registry for {name}")
-    # server returns published_at desc (db ORDER BY published_at DESC) :contentReference[oaicite:4]{index=4}
-    return versions[0]["version"]
+    return version_dir(cpm_dir, name, version)

@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
-from ..core.cpm_pkg import get_pinned_version, installed_versions, max_semver, version_dir
+from ..core.cpm_pkg import (
+    get_pinned_version,
+    installed_versions,
+    version_dir,
+    version_key,
+)
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -52,9 +57,8 @@ def _extract_packet_info(packet_root: Path) -> Dict[str, Any]:
     manifest = _read_json(packet_root / "manifest.json") or {}
     yml = _read_simple_yml(packet_root / "cpm.yml")
 
-    # prefer cpm.yml for "human" fields, fallback manifest/dir
     name = yml.get("name") or manifest.get("packet_id") or packet_root.name
-    version = yml.get("version") or manifest.get("cpm", {}).get("version") or "unknown"
+    version = yml.get("version") or (manifest.get("cpm", {}) or {}).get("version") or "unknown"
     description = yml.get("description") or ""
     tags = _split_csv(yml.get("tags"))
     entrypoints = _split_csv(yml.get("entrypoints"))
@@ -91,10 +95,11 @@ def _extract_packet_info(packet_root: Path) -> Dict[str, Any]:
 
 def _iter_packet_dirs(cpm_dir: Path) -> List[Path]:
     """
-    Supporta:
-      - legacy: .cpm/<name>/
-      - versioned: .cpm/<name>/<major>/<minor>/<patch>/
-    Ritorna i packet root reali (quelli che contengono manifest/cpm.yml/faiss).
+    Version-agnostic scan.
+
+    Struttura prevista:
+      .cpm/<name>/cpm.yml                 (pin file a livello packet)
+      .cpm/<name>/<v-part-1>/<v-part-2>/.../<v-part-n>/[manifest.json|faiss/index.faiss|cpm.yml]
     """
     if not cpm_dir.exists() or not cpm_dir.is_dir():
         return []
@@ -103,34 +108,41 @@ def _iter_packet_dirs(cpm_dir: Path) -> List[Path]:
 
     def is_packet_root(p: Path) -> bool:
         return (
-            (p / "manifest.json").exists()
-            or (p / "cpm.yml").exists()
-            or (p / "faiss" / "index.faiss").exists()
+                (p / "manifest.json").exists()
+                or (p / "cpm.yml").exists()
+                or (p / "faiss" / "index.faiss").exists()
         )
 
     for name_dir in sorted(cpm_dir.iterdir()):
         if not name_dir.is_dir():
             continue
 
-        # legacy root
+        # legacy root (se esiste ancora)
         if is_packet_root(name_dir):
             out.append(name_dir)
             continue
 
-        # versioned: <name>/<major>/<minor>/<patch>
-        for major_dir in sorted(name_dir.iterdir()):
-            if not major_dir.is_dir() or not major_dir.name.isdigit():
+        # versioned roots: cerca dirs che contengono artifact
+        for p in name_dir.rglob("*"):
+            if not p.is_dir():
                 continue
-            for minor_dir in sorted(major_dir.iterdir()):
-                if not minor_dir.is_dir() or not minor_dir.name.isdigit():
-                    continue
-                for patch_dir in sorted(minor_dir.iterdir()):
-                    if not patch_dir.is_dir() or not patch_dir.name.isdigit():
-                        continue
-                    if is_packet_root(patch_dir):
-                        out.append(patch_dir)
+            if p.name == ".history":
+                continue
+            if p == name_dir:
+                continue
+            if is_packet_root(p):
+                out.append(p)
 
-    return out
+    # dedup
+    uniq: List[Path] = []
+    seen = set()
+    for p in out:
+        key = str(p.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+    return uniq
 
 
 def cmd_cpm_lookup(args) -> None:
@@ -139,21 +151,24 @@ def cmd_cpm_lookup(args) -> None:
     if getattr(args, "all_versions", False):
         packet_dirs = _iter_packet_dirs(cpm_dir)
     else:
-        # current only: per name_dir scegli pinned o latest
-        packet_dirs = []
+        # current only: per packet scegli pinned o best locale (version_key)
+        packet_dirs: List[Path] = []
         if cpm_dir.exists():
             for name_dir in sorted(cpm_dir.iterdir()):
                 if not name_dir.is_dir():
                     continue
+
                 name = name_dir.name
+
                 pinned = get_pinned_version(cpm_dir, name)
                 if pinned:
                     vd = version_dir(cpm_dir, name, pinned)
                     if vd.exists():
                         packet_dirs.append(vd)
                         continue
+
                 vs = installed_versions(cpm_dir, name)
-                best = max_semver(vs) if vs else None
+                best = max(vs, key=version_key) if vs else None
                 if best:
                     vd = version_dir(cpm_dir, name, best)
                     if vd.exists():
@@ -164,4 +179,26 @@ def cmd_cpm_lookup(args) -> None:
         return
 
     infos = [_extract_packet_info(p) for p in packet_dirs]
-    ...
+
+    fmt = getattr(args, "format", "text")
+    if fmt == "jsonl":
+        for info in infos:
+            print(json.dumps(info, ensure_ascii=False))
+        return
+
+    for info in infos:
+        print(f"- {info['name']}@{info['version']}")
+        print(f"  path={info['path']}")
+        if info.get("description"):
+            print(f"  desc={info['description']}")
+        if info.get("embedding_model") or info.get("embedding_dim") is not None:
+            print(
+                f"  embedding={info.get('embedding_model')} "
+                f"dim={info.get('embedding_dim')} norm={info.get('embedding_normalized')}"
+            )
+        if info.get("docs") is not None or info.get("vectors") is not None:
+            print(f"  counts docs={info.get('docs')} vectors={info.get('vectors')}")
+        print(
+            f"  has_faiss={info.get('has_faiss')} has_docs={info.get('has_docs')} "
+            f"has_manifest={info.get('has_manifest')} has_cpm_yml={info.get('has_cpm_yml')}"
+        )

@@ -1,24 +1,27 @@
-# rag/cli/commands/install.py
 from __future__ import annotations
 
 from pathlib import Path
 
 from ..core.cpm_pkg import (
     RegistryClient,
-    parse_semver,
+    normalize_latest,
+    registry_latest_version,
     download_and_extract,
     set_pinned_version,
 )
 
-def _parse_spec(spec: str) -> tuple[str, str]:
+
+def _parse_spec_optional(spec: str) -> tuple[str, str | None]:
+    spec = (spec or "").strip()
+    if not spec:
+        raise SystemExit("[cpm:install] missing spec")
     if "@" not in spec:
-        raise SystemExit("[cpm:install] expected name@x.y.z")
+        return spec, None
     name, version = spec.split("@", 1)
     name = name.strip()
-    version = version.strip()
+    version = normalize_latest(version)
     if not name:
         raise SystemExit("[cpm:install] missing name")
-    parse_semver(version)
     return name, version
 
 
@@ -28,9 +31,15 @@ def cmd_cpm_install(args) -> None:
     if not registry:
         raise SystemExit("[cpm:install] missing --registry")
 
-    name, version = _parse_spec(args.spec)
+    name, version = _parse_spec_optional(args.spec)
 
     client = RegistryClient(registry)
+
+    # missing or latest => semantic latest
+    if version is None or version == "latest":
+        version = registry_latest_version(client, name)
+        print(f"[cpm:install] resolved latest: {name}@{version}")
+
     if not client.exists(name, version):
         raise SystemExit(f"[cpm:install] not found on registry: {name}@{version}")
 

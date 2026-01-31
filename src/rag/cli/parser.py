@@ -62,12 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite package if it already exists on registry (asks confirmation)",
     )
+    cpm_pub.add_argument("--yes", action="store_true", help="Assume yes for prompts")
     cpm_pub.set_defaults(func=cmd_cpm_publish)
 
     # install
     from .commands.install import cmd_cpm_install
     cpm_ins = cpm_sub.add_parser("install", help="Install packet from registry into .cpm/")
-    cpm_ins.add_argument("spec", help="name@x.y.z")
+    cpm_ins.add_argument("spec", help="name or name@<version|latest>")
     cpm_ins.add_argument("--registry", required=True)
     cpm_ins.add_argument("--cpm_dir", default=".cpm")
     cpm_ins.set_defaults(func=cmd_cpm_install)
@@ -75,14 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     # uninstall
     from .commands.uninstall import cmd_cpm_uninstall
     cpm_un = cpm_sub.add_parser("uninstall", help="Uninstall a packet or a specific version")
-    cpm_un.add_argument("spec", help="name or name@x.y.z")
+    cpm_un.add_argument("spec", help="name or name@<version|latest>")
+    cpm_un.add_argument("--registry", default="", help="Required if using @latest")
     cpm_un.add_argument("--cpm_dir", default=".cpm")
     cpm_un.set_defaults(func=cmd_cpm_uninstall)
 
     # update
     from .commands.update import cmd_cpm_update
     cpm_up = cpm_sub.add_parser("update", help="Update an installed packet (optionally to a target version)")
-    cpm_up.add_argument("spec", help="name or name@x.y.z (if missing version, takes registry latest)")
+    cpm_up.add_argument("spec", help="name or name@<version|latest>")
     cpm_up.add_argument("--registry", required=True)
     cpm_up.add_argument("--cpm_dir", default=".cpm")
     cpm_up.add_argument("--purge", action="store_true", help="Remove packet then install version fresh")
@@ -91,7 +93,8 @@ def build_parser() -> argparse.ArgumentParser:
     # use (pin)
     from .commands.use import cmd_cpm_use
     cpm_use = cpm_sub.add_parser("use", help="Switch current version (pin) without downloading")
-    cpm_use.add_argument("spec", help="name@x.y.z")
+    cpm_use.add_argument("spec", help="name@<version|latest>")
+    cpm_use.add_argument("--registry", default="", help="Required if using @latest")
     cpm_use.add_argument("--cpm_dir", default=".cpm")
     cpm_use.set_defaults(func=cmd_cpm_use)
 
@@ -102,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     cpm_lr.add_argument("--registry", required=True)
     cpm_lr.add_argument("--include-yanked", action="store_true")
     cpm_lr.add_argument("--format", choices=["text", "json"], default="text")
+    cpm_lr.add_argument("--sort-semantic", action="store_true")
     cpm_lr.set_defaults(func=cmd_cpm_list_remote)
 
     # prune

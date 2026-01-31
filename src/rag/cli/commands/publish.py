@@ -1,4 +1,3 @@
-# rag/cli/commands/publish.py
 from __future__ import annotations
 
 import tempfile
@@ -10,6 +9,7 @@ from ..core.cpm_pkg import (
     read_built_meta,
     make_versioned_tar_from_build_dir,
 )
+
 
 def cmd_cpm_publish(args) -> None:
     src_dir = Path(args.from_dir or ".").resolve()
@@ -26,39 +26,24 @@ def cmd_cpm_publish(args) -> None:
     client = RegistryClient(registry)
 
     exists = client.exists(name, version)
-
     if exists and not args.overwrite:
         raise SystemExit(
             f"[cpm:publish] {name}@{version} already exists on registry.\n"
             f"Use --overwrite to replace it."
         )
 
-    if exists and args.overwrite:
-        # interactive confirmation
+    if exists and args.overwrite and not getattr(args, "yes", False):
         answer = input(
             f"Package {name}@{version} already exists on registry.\n"
             f"Overwrite? [y/N]: "
         ).strip().lower()
-
         if answer not in ("y", "yes"):
             print("[cpm:publish] aborted")
             return
 
-    # build tar in temp
     with tempfile.TemporaryDirectory(prefix="cpm-tar-") as tmpd:
         tar_path = Path(tmpd) / f"{name}-{version}.tar.gz"
         make_versioned_tar_from_build_dir(src_dir, name, version, tar_path)
+        res = client.publish(name, version, str(tar_path), overwrite=bool(args.overwrite))
 
-        # publish with overwrite flag
-        res = client.publish(
-            name,
-            version,
-            str(tar_path),
-            overwrite=bool(args.overwrite),
-        )
-
-    print(
-        f"[cpm:publish] ok {name}@{version} "
-        f"sha256={res.get('sha256')} size={res.get('size_bytes')}"
-    )
-
+    print(f"[cpm:publish] ok {name}@{version} sha256={res.get('sha256')} size={res.get('size_bytes')}")
