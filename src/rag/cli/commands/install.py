@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from ..core.cpm_pkg import (
@@ -26,6 +27,7 @@ def _parse_spec_optional(spec: str) -> tuple[str, str | None]:
 
 
 def cmd_cpm_install(args) -> None:
+    logging.basicConfig(level=logging.INFO)
     cpm_dir = Path(args.cpm_dir or ".cpm").resolve()
     registry = (args.registry or "").rstrip("/")
     if not registry:

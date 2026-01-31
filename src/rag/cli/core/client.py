@@ -37,8 +37,13 @@ class RegistryClient:
         return r.json()
 
     def download(self, name: str, version: str, out_path: str) -> str:
-        r = requests.get(self._url(f"/v1/packages/{name}/{version}/download"), stream=True, timeout=120)
+        url = self._url(f"/v1/packages/{name}/{version}/download")
+        log.info(f"Downloading from {url}")
+        r = requests.get(url, stream=True, timeout=120)
         if r.status_code >= 400:
+            log.error(f"Download failed with status {r.status_code}")
+            log.error(f"Response headers: {r.headers}")
+            log.error(f"Response text: {r.text}")
             raise RuntimeError(f"download failed: {r.status_code} {r.text}")
 
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
