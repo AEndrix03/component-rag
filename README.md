@@ -255,22 +255,19 @@ To integrate CPM with Claude Desktop, add the following configuration to your Cl
 {
   "mcpServers": {
     "context-packet-manager": {
-      "command": "/path/to/your/venv/bin/python",
+      "command": "C:/path/to/context-packet-manager/cpm/.venv/Scripts/cpm.exe",
       "args": [
-        "-m",
-        "rag.cli",
-        "cpm",
         "mcp",
         "serve"
       ],
       "env": {
-        "PYTHONPATH": "/path/to/your/project/src",
-        "RAG_CPM_DIR": "/path/to/your/project/.cpm",
+        "RAG_CPM_DIR": "C:/path/to/context-packet-manager/.cpm",
         "RAG_EMBED_URL": "http://127.0.0.1:8876"
       }
     }
   }
 }
+
 ```
 
 **Platform-specific Python paths:**

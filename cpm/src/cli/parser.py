@@ -11,8 +11,8 @@ def _cmd_query(args):
 
 
 def _cmd_mcp_serve(args):
-    from mcp.server import main as mcp_main
-    return mcp_main()
+    from cpm_mcp.server import main as mcp_server_main
+    return mcp_server_main()
 
 
 def build_parser() -> argparse.ArgumentParser:

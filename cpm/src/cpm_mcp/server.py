@@ -317,7 +317,7 @@ def _query_packet(
     # Lazy imports: costosi
     import faiss  # type: ignore
 
-    from rag.embedding.http_embedder import HttpEmbedder  # local import
+    from embedding.http_embedder import HttpEmbedder  # local import
 
     packet_dir = _resolve_packet_dir(cpm_dir, packet)
     if packet_dir is None:
