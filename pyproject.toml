@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cpm"
 version = "0.1.0"
-description = "Baseline CPM vNext implementation with lightweight core, CLI, and plugin surface."
+description = "Baseline CPM implementation with lightweight core, CLI, and plugin surface."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,7 +18,7 @@ dependencies = [
 ]
 keywords = ["cpm", "rag", "plugin", "cli"]
 authors = [
-    {name = "Component RAG Team"},
+    { name = "Component RAG Team" },
 ]
 
 [project.optional-dependencies]

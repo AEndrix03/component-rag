@@ -10,7 +10,7 @@
 ## Build, Test, and Development Commands
 - `python -m venv .venv` and `pip install -e ./cpm` (or `./embedding_pool`, `./registry`): set up editable installs.
 - `cpm init`: create `.cpm/config.yml` and `.cpm/pool.yml`.
-- `cpm embed start-server --detach`: run the embedding server locally.
+- `cpm embed add --name local --url http://127.0.0.1:8876 --set-default`: register the local embedding endpoint.
 - `cpm build --input-dir ./docs --packet-dir ./packets/example --model jina-en --version 1.0.0`: build a packet.
 - `cpm query --packet example --query "..." -k 5`: query a packet.
 - `cpm-registry start --detach`: run the registry service.

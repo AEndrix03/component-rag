@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CPM (Context Packet Manager) vNext — a modular Python framework for building, managing, and querying context packets for RAG applications. Transforms documentation and codebases into chunked, embedded, FAISS-indexed knowledge bases.
+CPM (Context Packet Manager) — a modular Python framework for building, managing, and querying context packets for RAG
+applications. Transforms documentation and codebases into chunked, embedded, FAISS-indexed knowledge bases.
 
 ## Build & Development Commands
 
@@ -27,48 +28,64 @@ Pre-commit hooks run black, ruff, and mypy automatically.
 
 ## Architecture
 
-The codebase is split into four top-level Python packages. All new development happens here — the `cpm/`, `embedding_pool/`, and `registry/` directories are legacy references only.
+The codebase is split into four top-level Python packages. All new development happens here — the `cpm/`,
+`embedding_pool/`, and `registry/` directories are legacy references only.
 
 ### cpm_core/ — Foundation layer
-- **app.py** — `CPMApp` bootstraps all services (workspace, config, events, plugins, registry). Entry point for the runtime.
-- **workspace.py** — `Workspace`, `WorkspaceLayout` (defines `.cpm/` directory structure), `WorkspaceResolver` (layered config: CLI > env > workspace > user > defaults).
+
+- **app.py** — `CPMApp` bootstraps all services (workspace, config, events, plugins, registry). Entry point for the
+  runtime.
+- **workspace.py** — `Workspace`, `WorkspaceLayout` (defines `.cpm/` directory structure), `WorkspaceResolver` (layered
+  config: CLI > env > workspace > user > defaults).
 - **services.py** — `ServiceContainer` lightweight DI with lazy singleton initialization.
-- **registry/registry.py** — `FeatureRegistry` stores commands/builders/retrievers by qualified name (`group:name`). Handles disambiguation when simple names collide.
-- **plugin/manager.py** — `PluginManager` discovers plugins from workspace and user directories, loads `plugin.toml` manifests, and runs lifecycle (discover → validate → init → register).
+- **registry/registry.py** — `FeatureRegistry` stores commands/builders/retrievers by qualified name (`group:name`).
+  Handles disambiguation when simple names collide.
+- **plugin/manager.py** — `PluginManager` discovers plugins from workspace and user directories, loads `plugin.toml`
+  manifests, and runs lifecycle (discover → validate → init → register).
 - **events.py** — `EventBus` with priority-based subscribe/emit for plugin lifecycle hooks.
 - **api/abc.py** — Abstract base classes: `CPMAbstractCommand`, `CPMAbstractBuilder`, `CPMAbstractRetriever`.
-- **compat.py** — Legacy command aliases. Tokens like `lookup`, `query`, `publish`, `install` are routed to the old CLI parser in `cpm/src/cli/`.
+- **compat.py** — Legacy compatibility aliases mapped to current modular commands (`lookup/use/prune/mcp serve`).
 - **builtins/commands.py** — Core commands: `init`, `help`, `plugin:list`, `plugin:doctor`.
 
 ### cpm_cli/ — CLI routing
-- **main.py** — `main()` bootstraps `CPMApp`, resolves command tokens against `FeatureRegistry`, delegates legacy tokens via `cpm_core.compat`.
+
+- **main.py** — `main()` bootstraps `CPMApp`, resolves command tokens against `FeatureRegistry`, delegates legacy tokens
+  via `cpm_core.compat`.
 - **cli.py** — Bridge for legacy `embed` subcommands.
 - Entry point: `cpm = "cpm_cli.__main__:main"`.
 
 ### cpm_builtin/ — Built-in features
-- **chunking/** — Language-aware chunkers: `python_ast`, `java`, `markdown`, `text`, `treesitter_generic`, `brace_fallback`. `router.py` selects the right chunker by file extension.
+
+- **chunking/** — Language-aware chunkers: `python_ast`, `java`, `markdown`, `text`, `treesitter_generic`,
+  `brace_fallback`. `router.py` selects the right chunker by file extension.
 - **embeddings/** — `EmbeddingProviderConfig` (YAML), HTTP connector, caching.
 - **packages/** — `PackageManager`, version parsing, directory layout helpers.
 - **build.py**, **query.py**, **pkg.py** — Build, query, and package commands.
 
 ### cpm_plugins/ — Plugin implementations
-- **mcp/** — Model Context Protocol plugin. Exposes `lookup` and `query` as FastMCP tools for Claude Desktop integration (stdio mode). Registered via `plugin.toml` manifest.
+
+- **mcp/** — Model Context Protocol plugin. Exposes `lookup` and `query` as FastMCP tools for Claude Desktop
+  integration (stdio mode). Registered via `plugin.toml` manifest.
 
 ## Key Patterns
 
-- **Feature registration**: All commands/builders/retrievers register in `FeatureRegistry` with `group:name` keys (e.g., `cpm:init`, `plugin:doctor`). Resolution tries simple name first, falls back to qualified name on collision.
-- **Plugin lifecycle**: Plugins discovered via `plugin.toml` → entrypoint loaded → `PluginContext` passed → features registered in the shared registry.
-- **Workspace layout**: `.cpm/packages/`, `.cpm/config/`, `.cpm/cache/`, `.cpm/plugins/`, `.cpm/state/`, `.cpm/logs/`. Config is TOML-based; embeddings config is YAML.
-- **Legacy compatibility**: `cpm_core.compat` maps old CLI tokens to the legacy parser. `cpm doctor` prints the alias table and detects legacy `.cpm/` layouts needing migration.
+- **Feature registration**: All commands/builders/retrievers register in `FeatureRegistry` with `group:name` keys (e.g.,
+  `cpm:init`, `plugin:doctor`). Resolution tries simple name first, falls back to qualified name on collision.
+- **Plugin lifecycle**: Plugins discovered via `plugin.toml` → entrypoint loaded → `PluginContext` passed → features
+  registered in the shared registry.
+- **Workspace layout**: `.cpm/packages/`, `.cpm/config/`, `.cpm/cache/`, `.cpm/plugins/`, `.cpm/state/`, `.cpm/logs/`.
+  Config is TOML-based; embeddings config is YAML.
+- **Legacy compatibility**: `cpm_core.compat` maps a reduced alias set to native modular commands. `cpm doctor` prints the alias
+  table and detects legacy `.cpm/` layouts needing migration.
 
 ## Environment Variables
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `RAG_CPM_DIR` | `.cpm` | Workspace root |
-| `RAG_EMBED_URL` | `http://127.0.0.1:8876` | Embedding server URL |
-| `CPM_CONFIG` | `.cpm/config.yml` | Config file path |
-| `CPM_EMBEDDINGS` | `.cpm/embeddings.yml` | Embeddings config path |
+| Variable         | Default                 | Purpose                |
+|------------------|-------------------------|------------------------|
+| `RAG_CPM_DIR`    | `.cpm`                  | Workspace root         |
+| `RAG_EMBED_URL`  | `http://127.0.0.1:8876` | Embedding server URL   |
+| `CPM_CONFIG`     | `.cpm/config.yml`       | Config file path       |
+| `CPM_EMBEDDINGS` | `.cpm/embeddings.yml`   | Embeddings config path |
 
 ## Code Style
 

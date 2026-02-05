@@ -1,4 +1,4 @@
-"""Native features for CPM vNext."""
+"""Native features for CPM."""
 
 from .build import build_packet
 from .embed import start_embed

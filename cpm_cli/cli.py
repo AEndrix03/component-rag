@@ -1,4 +1,4 @@
-"""Minimal command line surface for the CPM vNext baseline."""
+"""Minimal command line surface for the CPM baseline."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from cpm_builtin import registry_status, run_query
+from cpm_builtin import run_query
 from cpm_builtin.build import build_packet
 from cpm_builtin.embeddings import (
     EmbeddingCache,
@@ -20,7 +20,7 @@ from cpm_builtin.packages import PackageManager, parse_package_spec
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cpm",
-        description="CPM vNext — lightweight CLI for build/query/pkg/embed flows.",
+        description="CPM — lightweight CLI for build/query/pkg/embed flows.",
     )
     parser.add_argument("--version", action="version", version="cpm v0.1.0")
     subparsers = parser.add_subparsers(dest="command")

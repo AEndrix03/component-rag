@@ -1,4 +1,4 @@
-"""Optional MCP plugin for CPM vNext."""
+"""Optional MCP plugin for CPM."""
 
 
 class MCPPlugin:

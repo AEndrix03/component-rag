@@ -1,4 +1,4 @@
-"""Optional official plugins for CPM vNext."""
+"""Optional official plugins for CPM."""
 
 from .mcp import MCPPlugin
 from .registry_client import RegistryPlugin

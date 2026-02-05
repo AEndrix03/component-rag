@@ -57,7 +57,7 @@ def query(
             "ok": False,
             "error": "embed_server_unreachable",
             "embed_url": exc.embed_url,
-            "hint": "start it with: rag cpm embed start-server --detach (or set RAG_EMBED_URL)",
+            "hint": "configure an embedding provider with `cpm embed add ... --set-default` or set RAG_EMBED_URL",
         }
     except Exception as exc:
         return {

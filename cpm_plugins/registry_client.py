@@ -1,4 +1,4 @@
-"""Optional registry client plugin for CPM vNext."""
+"""Optional registry client plugin for CPM."""
 
 
 class RegistryPlugin:

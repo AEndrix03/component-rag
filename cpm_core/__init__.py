@@ -1,12 +1,12 @@
-"""Core runtime pieces for the CPM vNext reference implementation."""
+"""Core runtime pieces for the CPM reference implementation."""
 
 from .app import CPMApp
 from .config import ConfigStore, default_config_path
 from .events import Event, EventBus
+from .paths import UserDirs
 from .plugin_manager import PluginManager
 from .registry import RegistryClient
 from .services import ServiceContainer
-from .paths import UserDirs
 from .workspace import Workspace, WorkspaceResolver, WorkspaceLayout
 
 __all__ = [

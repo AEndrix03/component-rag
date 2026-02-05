@@ -265,10 +265,7 @@ def _run_legacy_cli(tokens: Sequence[str]) -> int:
     if mapped_prefix is not None:
         return main([*mapped_prefix, *tail])
 
-    print(
-        "[cpm] legacy command bridge has been removed from this repository; "
-        f"'{command}' is no longer delegated to cpm/src/cli."
-    )
+    print(f"[cpm] unsupported compatibility alias: '{command}'")
     print("[cpm] use 'cpm help --long' to list supported commands.")
     return 1
 

@@ -1,1 +1,1 @@
-"""Test helpers for the CPM vNext baseline."""
+"""Test helpers for the CPM baseline."""

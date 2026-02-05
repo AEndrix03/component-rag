@@ -1,11 +1,10 @@
-"""Compatibility helpers for legacy CPM commands and layout migration."""
+"""Compatibility helpers for transitioning from legacy CPM layouts and commands."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import yaml
 
@@ -25,77 +24,35 @@ LEGACY_COMMAND_ALIASES: tuple[LegacyCommandAlias, ...] = (
     LegacyCommandAlias(
         legacy="embed",
         replacement="embedding helper under cpm_cli/cli.py",
-        note="configures providers and manages the legacy embed commands",
+        note="configures providers with cpm embed add/list/remove/set-default/test",
     ),
     LegacyCommandAlias(
         legacy="lookup",
         replacement="cpm pkg list",
-        note="legacy discovery shortcut (now part of pkg listing)",
-    ),
-    LegacyCommandAlias(
-        legacy="query",
-        replacement="legacy query tool (still available via alias)",
-        note="forwarded to the legacy CLI to preserve the old query UX",
-    ),
-    LegacyCommandAlias(
-        legacy="publish",
-        replacement="legacy publish flow (requires registry)",
-        note="connects to registry client defined in cpm/src/cli/core",
-    ),
-    LegacyCommandAlias(
-        legacy="install",
-        replacement="legacy install/pin flow",
-        note="installer commands still run through the legacy CLI",
-    ),
-    LegacyCommandAlias(
-        legacy="uninstall",
-        replacement="legacy uninstall command",
-        note="this flows through the legacy CLI implementation",
-    ),
-    LegacyCommandAlias(
-        legacy="update",
-        replacement="legacy update command",
-        note="uses the legacy registry-based update implementation",
+        note="legacy discovery shortcut mapped to package listing",
     ),
     LegacyCommandAlias(
         legacy="use",
-        replacement="legacy use command or cpm pkg use",
-        note="pkg use is the new API; legacy alias kept for compatibility",
-    ),
-    LegacyCommandAlias(
-        legacy="list-remote",
-        replacement="legacy list-remote command",
-        note="lists registry versions via the older CLI",
+        replacement="cpm pkg use",
+        note="pin and activate an installed package version",
     ),
     LegacyCommandAlias(
         legacy="prune",
         replacement="cpm pkg prune",
-        note="pruning remains under pkg (new layout) but old command is still supported",
+        note="remove old package versions while keeping active/pinned",
     ),
     LegacyCommandAlias(
-        legacy="cache",
-        replacement="legacy cache clear",
-        note="delegates to the legacy cache management commands",
-    ),
-    LegacyCommandAlias(
-        legacy="mcp",
-        replacement="cpm serve (new plugin) or legacy mcp serve alias",
-        note="the legacy MCP serve command is still available for scripts that use mcp:serve",
+        legacy="mcp serve",
+        replacement="cpm serve",
+        note="historical alias retained for compatibility",
     ),
 )
 
 LEGACY_COMMAND_TOKENS: frozenset[str] = frozenset(
     {
         "lookup",
-        "query",
-        "publish",
-        "install",
-        "uninstall",
-        "update",
         "use",
-        "list-remote",
         "prune",
-        "cache",
         "mcp",
     }
 )

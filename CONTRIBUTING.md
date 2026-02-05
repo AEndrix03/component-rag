@@ -1,4 +1,4 @@
-# Contributing to CPM vNext
+# Contributing to CPM
 
 ## Getting started
 
@@ -9,7 +9,8 @@
 ## Plugin conventions
 
 - Official plugins live under `cpm_plugins/` and should be discoverable via the `PluginManager`.
-- Package names for optional components should follow the `cpm-<feature>` pattern to keep them distinguishable from third-party plugins.
+- Package names for optional components should follow the `cpm-<feature>` pattern to keep them distinguishable from
+  third-party plugins.
 - Each plugin must register through the plugin manager and expose a clear `activate` or `connect` hook.
 - Keep plugin dependencies light or optional so that the baseline CLI remains runnable with `pip install -e .`.
 
@@ -21,5 +22,7 @@
 
 ## Compatibility notes
 
-- The legacy codebase (`cpm/`, `embedding_pool/`, `registry/`, and `CPM.zip`) stays in the repository as a reference for the previous architecture.
-- When updating core behavior, document the gap between the new lightweight runtime and the legacy implementation so curiosity-driven contributors can follow the transition.
+- The legacy codebase (`cpm/`, `embedding_pool/`, `registry/`, and `CPM.zip`) stays in the repository as a reference for
+  the previous architecture.
+- When updating core behavior, document the gap between the new lightweight runtime and the legacy implementation so
+  curiosity-driven contributors can follow the transition.
