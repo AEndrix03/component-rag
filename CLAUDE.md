@@ -28,8 +28,8 @@ Pre-commit hooks run black, ruff, and mypy automatically.
 
 ## Architecture
 
-The codebase is split into four top-level Python packages. All new development happens here — the `cpm/`,
-`embedding_pool/`, and `registry/` directories are legacy references only.
+The codebase is split into modular top-level Python packages (`cpm_core`, `cpm_cli`, `cpm_builtin`, `cpm_plugins`).
+New development happens in this modular stack; `registry/` is maintained as an external service package.
 
 ### cpm_core/ — Foundation layer
 

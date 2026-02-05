@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from cpm_core.paths import UserDirs
 from cpm_core.workspace import (
     CONFIG_FILE_NAME,
@@ -11,7 +13,8 @@ from cpm_core.workspace import (
 )
 
 
-def test_find_workspace_in_parent(tmp_path: Path) -> None:
+def test_find_workspace_in_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     project = tmp_path / "project"
     workspace_root = project / ".cpm"
     workspace_root.mkdir(parents=True)
@@ -43,7 +46,10 @@ def test_ensure_workspace_creates_layout(tmp_path: Path) -> None:
     assert second_root == workspace_root
 
 
-def test_ensure_workspace_handles_relative_paths(tmp_path: Path) -> None:
+def test_ensure_workspace_handles_relative_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     resolver = WorkspaceResolver()
     nested = tmp_path / "project" / "nested"
     nested.mkdir(parents=True)
@@ -53,7 +59,8 @@ def test_ensure_workspace_handles_relative_paths(tmp_path: Path) -> None:
     assert workspace_root == (nested.resolve() / ".cpm")
 
 
-def test_config_resolution_precedence(tmp_path: Path) -> None:
+def test_config_resolution_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     user_config_dir = tmp_path / "user-config"
     user_dirs = UserDirs(config_dir_override=user_config_dir)
     user_config_dir.mkdir()

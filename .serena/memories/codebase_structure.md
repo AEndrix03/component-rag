@@ -7,6 +7,6 @@
 
 Primary entrypoints:
 - CPM CLI: `cpm` (core commands like build/query/publish)
-- Embedding server: `cpm embed start-server`
+- Embedding providers: `cpm embed add/list/remove/set-default/test`
 - Registry server: `cpm-registry start`
 - MCP server: `cpm mcp serve`

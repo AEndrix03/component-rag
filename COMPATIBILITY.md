@@ -5,13 +5,8 @@ Those directories contain the minimal baseline described in the dev spec.
 
 Legacy references:
 
-- `cpm/`, `embedding_pool/`, and `registry/` contain the previous CPM runtime. They stay in the repository as reference
-  material.
-- `CPM.zip` is the zipped artifact from the prior iteration and should not be modified; treat it as a snapshot of the
-  legacy project.
-
-Use the legacy directories for migration context only; new development should own the `cpm_*` layout from this point
-forward.
+- Runtime behavior is now provided by the modular packages (`cpm_core`, `cpm_cli`, `cpm_builtin`, `cpm_plugins`).
+- `registry/` remains a separate service package and is outside the command-compatibility bridge.
 
 ## Legacy command aliases
 
@@ -22,17 +17,6 @@ Aliases are translated to modular commands within the new architecture:
 - `use` -> `cpm pkg use`
 - `prune` -> `cpm pkg prune`
 - `mcp serve` -> `cpm serve`
-- `lookup`
-- `query`
-- `publish`
-- `install`
-- `uninstall`
-- `update`
-- `use`
-- `list-remote`
-- `prune`
-- `cache ...`
-- `mcp ...`
 
 `cpm doctor` prints this alias table every time it runs so you can double-check the mapping in a live workspace.
 

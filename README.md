@@ -108,7 +108,7 @@ cpm pkg:prune my-packet --keep 2  # Keep 2 latest versions
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/component-rag.git
+git clone https://github.com/AEndrix03/component-rag.git
 cd component-rag
 
 # Create virtual environment
@@ -340,11 +340,13 @@ simply implement your own builder and pass `--builder your-builder` during build
 ### Extensibility at Every Level
 
 **Builders**: CPM intelligently selects builders based on project structure. Need custom logic?
+
 ```bash
 cpm build --source ./docs --builder my-custom-builder
 ```
 
 **Retrievers**: Auto-detected from project configuration, or explicitly specified:
+
 ```bash
 cpm query --packet my-docs --query "search" --retriever my-custom-retriever
 ```
@@ -539,7 +541,7 @@ CPM includes comprehensive documentation for every component:
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/component-rag.git
+git clone https://github.com/AEndrix03/component-rag.git
 cd component-rag
 python -m venv .venv
 source .venv/bin/activate

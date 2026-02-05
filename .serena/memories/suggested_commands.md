@@ -11,10 +11,10 @@
 - `cpm publish --from ./packets/my-knowledge-base --registry http://localhost:8786`
 - `cpm install my-knowledge-base@1.0.0 --registry http://localhost:8786`
 
-# Embedding server
-- `cpm embed register --model jinaai/jina-embeddings-v2-base-en --type local_st --max-seq-length 512 --normalize --alias jina-en`
-- `cpm embed start-server --detach`
-- `cpm embed status`
+# Embedding providers
+- `cpm embed add --name local --url http://127.0.0.1:8876 --set-default`
+- `cpm embed list`
+- `cpm embed test --text "hello"`
 
 # Registry server
 - `cpm-registry start --detach`

@@ -115,10 +115,10 @@ class WorkspaceResolver:
         """Look for an existing .cpm workspace by walking parent directories."""
         override = self._override_root_value()
         if override:
-            candidate = override.expanduser().resolve()
+            candidate = self._resolve_override_root(override, start_dir)
             if candidate.is_dir():
                 return candidate
-            return None
+
         start = (Path(start_dir) if start_dir else Path.cwd()).resolve()
         for current in (start, *start.parents):
             candidate = current / self.workspace_name
@@ -130,7 +130,7 @@ class WorkspaceResolver:
         """Create the minimal .cpm hierarchy and return the workspace root."""
         override = self._override_root_value()
         if override:
-            root = override.expanduser().resolve()
+            root = self._resolve_override_root(override, start_dir)
         else:
             existing = self.find_workspace(start_dir)
             if existing is not None:
@@ -173,6 +173,13 @@ class WorkspaceResolver:
         if override := self._env_value("cpm_dir"):
             return Path(override)
         return None
+
+    def _resolve_override_root(self, override: Path, start_dir: Path | None) -> Path:
+        expanded = override.expanduser()
+        if expanded.is_absolute():
+            return expanded.resolve()
+        base = (Path(start_dir) if start_dir else Path.cwd()).resolve()
+        return (base / expanded).resolve()
 
     def _workspace_config_layer(self, start_dir: Path | None) -> dict[str, str]:
         workspace_root = self.find_workspace(start_dir)

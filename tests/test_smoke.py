@@ -20,7 +20,16 @@ def test_bootstrap_without_plugins(tmp_path: Path) -> None:
     status = app.bootstrap()
 
     assert status.plugins == ("core",)
-    assert status.commands == ("build", "default-builder", "doctor", "help", "init", "list", "listing")
+    assert status.commands == (
+        "build",
+        "default-builder",
+        "doctor",
+        "help",
+        "init",
+        "list",
+        "listing",
+        "pkg",
+    )
     assert status.registry_status == "online"
 
 
@@ -41,6 +50,7 @@ def test_bootstrap_with_sample_plugin(tmp_path: Path) -> None:
         "init",
         "list",
         "listing",
+        "pkg",
         "sample-builder",
         "sample-command",
     )

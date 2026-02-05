@@ -22,7 +22,6 @@
 
 ## Compatibility notes
 
-- The legacy codebase (`cpm/`, `embedding_pool/`, `registry/`, and `CPM.zip`) stays in the repository as a reference for
-  the previous architecture.
+- Legacy command behavior is documented in the modular compatibility layer; do not reintroduce archived runtime trees.
 - When updating core behavior, document the gap between the new lightweight runtime and the legacy implementation so
   curiosity-driven contributors can follow the transition.
