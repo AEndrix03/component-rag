@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from cpm_core.api import cpmcommand
+from cpm_builtin.embeddings import VALID_EMBEDDING_MODES
 from cpm_core.build import DefaultBuilder, DefaultBuilderConfig
 from cpm_core.registry import CPMRegistryEntry, FeatureRegistry
 from .commands import _WorkspaceAwareCommand
@@ -78,6 +79,7 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     source_data = config_data.get("source") or {}
     output_data = config_data.get("output") or {}
     embedding_data = config_data.get("embedding") or {}
+    embeddings_data = config_data.get("embeddings") or {}
     chunking_data = config_data.get("chunking") or {}
 
     cli_source = getattr(argv, "source", None)
@@ -136,13 +138,29 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     embed_url = _as_str(
         cli_embed_url,
         _as_str(
-            embedding_data.get("embed_url"),
+            embeddings_data.get("url")
+            or embeddings_data.get("embed_url")
+            or embedding_data.get("embed_url"),
             os.environ.get("RAG_EMBED_URL") or DefaultBuilderConfig().embed_url,
         ),
     )
 
+    cli_embeddings_mode = getattr(argv, "embeddings_mode", None)
+    embeddings_mode = _as_str(
+        cli_embeddings_mode,
+        _as_str(
+            embeddings_data.get("mode"),
+            os.environ.get("RAG_EMBED_MODE") or DefaultBuilderConfig().embeddings_mode,
+        ),
+    ).strip().lower()
+    if embeddings_mode not in VALID_EMBEDDING_MODES:
+        embeddings_mode = DefaultBuilderConfig().embeddings_mode
+
     timeout = getattr(argv, "timeout", None)
-    timeout_value = _as_float(timeout, _as_float(embedding_data.get("timeout"), None))
+    timeout_value = _as_float(
+        timeout,
+        _as_float(embeddings_data.get("timeout"), _as_float(embedding_data.get("timeout"), None)),
+    )
 
     builder_config = DefaultBuilderConfig(
         model_name=model_name,
@@ -153,6 +171,7 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
         archive=archive,
         archive_format=archive_format,
         embed_url=embed_url,
+        embeddings_mode=embeddings_mode,
         timeout=timeout_value,
     )
 
@@ -181,6 +200,11 @@ class BuildCommand(_WorkspaceAwareCommand):
         parser.add_argument("--archive-format", choices=SUPPORTED_ARCHIVE_FORMATS)
         parser.add_argument("--no-archive", action="store_true")
         parser.add_argument("--embed-url", help="Embedding server URL")
+        parser.add_argument(
+            "--embeddings-mode",
+            choices=VALID_EMBEDDING_MODES,
+            help="Embedding transport mode (http|legacy). Default: http",
+        )
         parser.add_argument("--timeout", type=float, help="Embedding request timeout (seconds)")
 
     def run(self, argv: Any) -> int:

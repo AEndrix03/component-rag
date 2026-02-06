@@ -1,10 +1,10 @@
 """console script entrypoint for the CPM CLI."""
 
-from .main import main
-
 
 def run() -> int:
-    return main()
+    from .main import main as cli_main
+
+    return cli_main()
 
 
 def main() -> int:

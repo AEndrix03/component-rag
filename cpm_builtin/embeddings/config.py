@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,53 @@ def _ensure_mapping(data: Any) -> Mapping[str, Any]:
     raise ValueError("expected mapping for embeddings configuration")
 
 
+def _resolve_env_value(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        env_name = value[2:-1].strip()
+        if env_name:
+            return os.getenv(env_name, "")
+    return value
+
+
+def _to_optional_int(value: Any) -> int | None:
+    value = _resolve_env_value(value)
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _to_optional_float(value: Any) -> float | None:
+    value = _resolve_env_value(value)
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _to_optional_bool(value: Any) -> bool | None:
+    value = _resolve_env_value(value)
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _parse_normalize_mode(value: Any) -> str:
+    value = _resolve_env_value(value)
+    normalized = str(value).strip().lower() if value is not None else ""
+    if not normalized:
+        return "auto"
+    if normalized in {"server", "client", "auto"}:
+        return normalized
+    raise ValueError("normalize_mode must be one of: server, client, auto")
+
+
 @dataclass
 class EmbeddingProviderConfig:
     name: str
@@ -30,6 +78,15 @@ class EmbeddingProviderConfig:
     model: str | None = None
     dims: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    http_base_url: str | None = None
+    http_path: str = "/v1/embeddings"
+    http_timeout: float | None = None
+    http_headers_static: dict[str, str] = field(default_factory=dict)
+    hint_dim: int | None = None
+    hint_normalize: bool | None = None
+    normalize_mode: str = "auto"
+    hint_task: str | None = None
+    hint_model: str | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: Mapping[str, Any]) -> "EmbeddingProviderConfig":
@@ -38,7 +95,18 @@ class EmbeddingProviderConfig:
         headers_raw = raw.get("headers") or {}
         headers_raw = _ensure_mapping(headers_raw)
         for header_key, header_value in headers_raw.items():
-            headers[str(header_key)] = str(header_value)
+            headers[str(header_key)] = str(_resolve_env_value(header_value))
+
+        http_raw = raw.get("http") or {}
+        http_raw = _ensure_mapping(http_raw)
+        headers_static: dict[str, str] = {}
+        headers_static_raw = http_raw.get("headers_static") or {}
+        headers_static_raw = _ensure_mapping(headers_static_raw)
+        for header_key, header_value in headers_static_raw.items():
+            headers_static[str(header_key)] = str(_resolve_env_value(header_value))
+
+        hints_raw = raw.get("hints") or {}
+        hints_raw = _ensure_mapping(hints_raw)
 
         extra_entries: dict[str, Any] = {}
         extra_raw = raw.get("extra") or {}
@@ -50,28 +118,60 @@ class EmbeddingProviderConfig:
 
         auth = raw.get("auth")
         if isinstance(auth, Mapping):
-            auth = {str(k): v for k, v in auth.items()}
+            auth = {str(k): _resolve_env_value(v) for k, v in auth.items()}
         elif auth is not None and isinstance(auth, str):
-            auth = {"token": auth}
+            auth = {"token": _resolve_env_value(auth)}
+
+        url = _resolve_env_value(raw.get("url"))
+        http_base_url = _resolve_env_value(http_raw.get("base_url"))
+        if url is None and http_base_url is None:
+            raise KeyError("url")
+        url_str = str(url if url is not None else http_base_url)
+
+        hint_model = _resolve_env_value(hints_raw.get("model"))
+        if hint_model is None:
+            hint_model = _resolve_env_value(raw.get("model"))
+
+        hint_dim = _resolve_env_value(hints_raw.get("dim"))
+        if hint_dim is None:
+            hint_dim = _resolve_env_value(raw.get("dims"))
 
         return cls(
             name=name,
             type=str(raw.get("type", "http")),
-            url=str(raw["url"]),
+            url=url_str,
             headers=headers,
             auth=auth,
-            timeout=raw.get("timeout"),
-            batch_size=raw.get("batch_size"),
-            model=raw.get("model"),
-            dims=raw.get("dims"),
+            timeout=_to_optional_float(raw.get("timeout")),
+            batch_size=_to_optional_int(raw.get("batch_size")),
+            model=str(_resolve_env_value(raw.get("model"))) if raw.get("model") is not None else None,
+            dims=_to_optional_int(raw.get("dims")),
             extra=extra_entries,
+            http_base_url=str(http_base_url) if http_base_url is not None else None,
+            http_path=str(_resolve_env_value(http_raw.get("path", "/v1/embeddings"))),
+            http_timeout=_to_optional_float(http_raw.get("timeout")),
+            http_headers_static=headers_static,
+            hint_dim=_to_optional_int(hint_dim),
+            hint_normalize=_to_optional_bool(hints_raw.get("normalize")),
+            normalize_mode=_parse_normalize_mode(raw.get("normalize_mode")),
+            hint_task=(
+                str(_resolve_env_value(hints_raw.get("task")))
+                if hints_raw.get("task") is not None
+                else None
+            ),
+            hint_model=str(hint_model) if hint_model is not None else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "type": self.type,
-            "url": self.url,
+            "http": {
+                "base_url": self.resolved_http_base_url,
+                "path": self.resolved_http_path,
+            },
         }
+        if self.url:
+            data["url"] = self.url
         if self.headers:
             data["headers"] = self.headers
         if self.auth:
@@ -86,7 +186,58 @@ class EmbeddingProviderConfig:
             data["dims"] = self.dims
         if self.extra:
             data["extra"] = self.extra
+        if self.resolved_http_timeout is not None:
+            data["http"]["timeout"] = self.resolved_http_timeout
+        if self.resolved_headers_static:
+            data["http"]["headers_static"] = self.resolved_headers_static
+
+        hints: dict[str, Any] = {}
+        if self.resolved_hint_dim is not None:
+            hints["dim"] = self.resolved_hint_dim
+        if self.hint_normalize is not None:
+            hints["normalize"] = self.hint_normalize
+        if self.hint_task:
+            hints["task"] = self.hint_task
+        if self.resolved_hint_model:
+            hints["model"] = self.resolved_hint_model
+        if hints:
+            data["hints"] = hints
+        if self.normalize_mode != "auto":
+            data["normalize_mode"] = self.normalize_mode
         return data
+
+    @property
+    def resolved_http_base_url(self) -> str:
+        return (self.http_base_url or self.url).rstrip("/")
+
+    @property
+    def resolved_http_path(self) -> str:
+        path = self.http_path or "/v1/embeddings"
+        return path if path.startswith("/") else f"/{path}"
+
+    @property
+    def resolved_http_timeout(self) -> float | None:
+        if self.http_timeout is not None:
+            return float(self.http_timeout)
+        if self.timeout is not None:
+            return float(self.timeout)
+        return None
+
+    @property
+    def resolved_headers_static(self) -> dict[str, str]:
+        merged = {str(k): str(v) for k, v in self.headers.items()}
+        merged.update({str(k): str(v) for k, v in self.http_headers_static.items()})
+        return merged
+
+    @property
+    def resolved_hint_dim(self) -> int | None:
+        if self.hint_dim is not None:
+            return int(self.hint_dim)
+        return self.dims
+
+    @property
+    def resolved_hint_model(self) -> str | None:
+        return self.hint_model or self.model
 
 
 @dataclass

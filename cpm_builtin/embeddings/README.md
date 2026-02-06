@@ -6,6 +6,74 @@ The embedding system provides a flexible, YAML-configured approach to managing m
 
 ---
 
+## External Adapter Spec (OpenAI Ingress)
+
+CPM must target the adapter `base_url` only. CPM does not call TEI/Jina/custom endpoints directly.
+
+### Contract
+
+- CPM endpoint: `POST {base_url}/v1/embeddings`
+- Ingress format: OpenAI-compatible embeddings request/response
+- Egress format: provider-native (TEI/Jina/custom), handled only by adapter
+- CPM policy: standard-only (no provider-specific payloads, headers, or response parsing in CPM runtime)
+
+### Ingress Request (Adapter API)
+
+```json
+{
+  "input": ["text-1", "text-2"],
+  "model": "text-embedding-3-small",
+  "dimensions": 768,
+  "user": "optional-trace-id"
+}
+```
+
+Notes:
+- `input` supports string or list of strings; adapter should normalize internally to list semantics.
+- `model` can be mapped by adapter to provider-specific model identifiers.
+- Optional OpenAI-compatible fields may be accepted and forwarded/mapped by adapter.
+
+### Ingress Response (Adapter API)
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "embedding", "index": 0, "embedding": [0.1, 0.2] },
+    { "object": "embedding", "index": 1, "embedding": [0.3, 0.4] }
+  ],
+  "model": "resolved-model-name",
+  "usage": { "prompt_tokens": 12, "total_tokens": 12 }
+}
+```
+
+Requirements:
+- `data` must be sortable by `index` and represent one embedding per input item.
+- `embedding` must be numeric arrays with consistent dimensions.
+- Errors must be OpenAI-like JSON error objects with appropriate HTTP status codes.
+
+### Adapter Egress Responsibilities
+
+- TEI: map ingress request to TEI payload/headers and map TEI response back to OpenAI `data[index].embedding`.
+- Jina: map ingress request to Jina API format and normalize response into OpenAI schema.
+- Custom providers: implement provider-specific auth, request shaping, retries, and response mapping inside adapter.
+
+### Error/Timeout Policy
+
+- `400`: invalid input/schema/model arguments
+- `401/403`: auth/permission failures
+- `429`: provider rate limit surfaced by adapter
+- `503`: temporary upstream unavailable (retryable by CPM client policy)
+- network timeout: adapter should fail fast; CPM may retry based on client retry policy
+
+### Non-Goals for CPM
+
+- No direct provider integration logic in CPM core/builtin clients.
+- No provider-specific response branches in CPM parsing code.
+- No provider-specific auth logic in CPM beyond standard adapter authentication.
+
+---
+
 ## Quick Start
 
 ```python
@@ -98,6 +166,63 @@ providers:
 | `headers` | dict | No | Custom HTTP headers |
 | `auth` | object | No | Authentication configuration |
 | `extra` | dict | No | Additional options passed to API |
+
+### OpenAI-Compatible Adapter Configuration
+
+For CPM standard-only mode, point providers to an adapter that exposes `POST /v1/embeddings`.
+The adapter is responsible for translating to TEI/Jina/custom backends.
+
+```yaml
+# .cpm/config/embeddings.yml
+default: adapter-local
+
+providers:
+  - name: adapter-local
+    type: http
+    url: http://127.0.0.1:8080
+    model: text-embedding-3-small
+    dims: 768
+    batch_size: 32
+    timeout: 30
+    auth:
+      type: bearer
+      token: ${ADAPTER_API_KEY}
+    http:
+      base_url: http://127.0.0.1:8080
+      path: /v1/embeddings
+      timeout: 30
+      headers_static:
+        X-Trace-Source: cpm
+    hints:
+      dim: 768
+      normalize: true
+      task: retrieval.document
+      model: text-embedding-3-small
+```
+
+Quick setup from CLI:
+
+```bash
+cpm embed add \
+  --name adapter-local \
+  --url http://127.0.0.1:8080 \
+  --model text-embedding-3-small \
+  --dims 768 \
+  --set-default
+```
+
+### Supported Hint Headers
+
+`HttpEmbeddingConnector` translates configured `hints` into request headers:
+
+| Hint key | Header | Example value |
+|----------|--------|---------------|
+| `hints.dim` | `X-Embedding-Dim` | `768` |
+| `hints.normalize` | `X-Embedding-Normalize` | `true` |
+| `hints.task` | `X-Embedding-Task` | `retrieval.document` |
+| `hints.model` (or `model`) | `X-Model-Hint` | `text-embedding-3-small` |
+
+These headers are optional. Adapters can ignore unsupported hints.
 
 ### Authentication
 
@@ -491,6 +616,54 @@ vectors = connector.embed_texts(["sample text"])
 # Extra options are passed in the request payload
 ```
 
+### Example 6: Docker Compose (Adapter + TEI)
+
+```yaml
+services:
+  adapter:
+    image: ghcr.io/your-org/openai-embeddings-adapter:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ADAPTER_PROVIDER: tei
+      PROVIDER_BASE_URL: http://tei:80
+      PROVIDER_EMBED_PATH: /embed
+      OPENAI_DEFAULT_MODEL: text-embedding-3-small
+    depends_on:
+      - tei
+
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command:
+      - "--model-id"
+      - "jinaai/jina-embeddings-v2-base-en"
+      - "--port"
+      - "80"
+```
+
+### Example 7: Docker Compose (Adapter + Jina-Compatible Backend)
+
+```yaml
+services:
+  adapter:
+    image: ghcr.io/your-org/openai-embeddings-adapter:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ADAPTER_PROVIDER: jina
+      PROVIDER_BASE_URL: http://jina-http:8000
+      PROVIDER_EMBED_PATH: /v1/embeddings
+      OPENAI_DEFAULT_MODEL: text-embedding-3-small
+      PROVIDER_API_KEY: ${JINA_API_KEY}
+    depends_on:
+      - jina-http
+
+  jina-http:
+    image: ghcr.io/your-org/jina-http-embeddings:latest
+    environment:
+      JINA_MODEL: jina-embeddings-v3
+```
+
 ---
 
 ## Integration with Build System
@@ -594,12 +767,41 @@ ValueError("response vector does not match expected dims")
 # Solution: Verify provider.dims matches model output
 ```
 
+Operational checklist:
+- Keep `dims` and `hints.dim` aligned with the real output size of your adapter/provider.
+- Probe adapter output once and check embedding length before large builds.
+- If adapter switches model, update both `model` and expected dimensions.
+
+#### Normalization Issues
+
+```text
+Symptoms: poor retrieval quality, unstable ranking, cosine/IP mismatch.
+```
+
+Operational checklist:
+- Decide a single normalization point (adapter side or client side), not both.
+- If your retrieval expects cosine via inner product, ensure vectors are L2-normalized.
+- Use `hints.normalize: true` only if your adapter supports it.
+- Validate norms on a sample vector set (`||v|| ~= 1.0` for non-zero vectors).
+
 #### Authentication Failed
 
 ```python
 # HTTP 401 or 403
 # Solution: Check auth configuration and credentials
 ```
+
+#### Request Timeouts
+
+```text
+Symptoms: timeout errors, intermittent retries, 503 under load.
+```
+
+Operational checklist:
+- Reduce `batch_size` first, then increase `timeout`.
+- Align adapter upstream timeout > CPM timeout to avoid partial cancellations.
+- Inspect adapter logs for slow provider calls and saturation.
+- Treat frequent `503` as upstream pressure and add backoff/capacity.
 
 ---
 

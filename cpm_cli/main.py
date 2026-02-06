@@ -259,6 +259,16 @@ def _run_legacy_cli(tokens: Sequence[str]) -> int:
         "lookup": ["pkg", "list"],
         "use": ["pkg", "use"],
         "prune": ["pkg", "prune"],
+        "pkg:list": ["pkg", "list"],
+        "pkg:use": ["pkg", "use"],
+        "pkg:prune": ["pkg", "prune"],
+        "pkg:remove": ["pkg", "remove"],
+        "embed:add": ["embed", "add"],
+        "embed:list": ["embed", "list"],
+        "embed:remove": ["embed", "remove"],
+        "embed:set-default": ["embed", "set-default"],
+        "embed:test": ["embed", "test"],
+        "embed:status": ["embed", "list"],
     }
 
     mapped_prefix = alias_map.get(command)

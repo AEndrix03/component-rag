@@ -4,69 +4,25 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import faiss
-import numpy as np
-import requests
+from cpm_builtin.embeddings import EmbeddingClient
 
 from .reader import PacketReader
 
 DEFAULT_EMBED_URL = "http://127.0.0.1:8876"
+DEFAULT_EMBED_MODE = "http"
 
 
 class EmbedServerError(RuntimeError):
     """Raised when the embedding HTTP service is unreachable."""
 
-    def __init__(self, embed_url: str) -> None:
-        super().__init__(f"embedding server unreachable at {embed_url}")
+    def __init__(self, embed_url: str, embed_mode: str) -> None:
+        super().__init__(f"embedding server unreachable at {embed_url} (mode={embed_mode})")
         self.embed_url = embed_url
-
-
-@dataclass(frozen=True)
-class HttpEmbedder:
-    """Minimal client for the legacy embedding HTTP server."""
-
-    base_url: str
-    timeout_s: Optional[float] = None
-
-    def health(self) -> bool:
-        try:
-            response = requests.get(f"{self.base_url}/health", timeout=2.0)
-            return response.ok
-        except Exception:
-            return False
-
-    def embed_texts(
-        self,
-        texts: List[str],
-        *,
-        model_name: str,
-        max_seq_length: int,
-        normalize: bool,
-        dtype: str,
-        show_progress: bool,
-    ) -> np.ndarray:
-        payload = {
-            "model": model_name,
-            "texts": texts,
-            "options": {
-                "max_seq_length": int(max_seq_length),
-                "normalize": bool(normalize),
-                "show_progress": bool(show_progress),
-            },
-        }
-
-        response = requests.post(
-            f"{self.base_url}/embed",
-            json=payload,
-            timeout=self.timeout_s,
-        )
-        response.raise_for_status()
-        body = response.json()
-        return np.array(body["vectors"], dtype=np.float32)
+        self.embed_mode = embed_mode
 
 
 class PacketRetriever:
@@ -78,6 +34,7 @@ class PacketRetriever:
         packet: str,
         *,
         embed_url: Optional[str] = None,
+        embed_mode: Optional[str] = None,
     ) -> None:
         self.cpm_dir = cpm_dir
         self.packet = packet
@@ -100,6 +57,11 @@ class PacketRetriever:
             embed_url
             or os.environ.get("RAG_EMBED_URL")
             or DEFAULT_EMBED_URL
+        )
+        self.embed_mode = (
+            embed_mode
+            or os.environ.get("RAG_EMBED_MODE")
+            or DEFAULT_EMBED_MODE
         )
         self.docs = self._load_docs()
         self.index = self._load_index()
@@ -124,10 +86,10 @@ class PacketRetriever:
             raise FileNotFoundError(f"missing faiss index at {index_path}")
         return faiss.read_index(str(index_path))
 
-    def _new_embedder(self) -> HttpEmbedder:
-        embedder = HttpEmbedder(self.embed_url)
+    def _new_embedder(self) -> EmbeddingClient:
+        embedder = EmbeddingClient(self.embed_url, mode=self.embed_mode)
         if not embedder.health():
-            raise EmbedServerError(self.embed_url)
+            raise EmbedServerError(self.embed_url, self.embed_mode)
         return embedder
 
     def retrieve(self, query: str, k: int) -> Dict[str, Any]:
@@ -167,6 +129,7 @@ class PacketRetriever:
                 "model": self.model_name,
                 "max_seq_length": self.max_seq_length,
                 "embed_url": self.embed_url,
+                "mode": self.embed_mode,
             },
             "results": hits,
         }

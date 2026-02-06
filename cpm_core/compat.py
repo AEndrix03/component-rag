@@ -54,6 +54,16 @@ LEGACY_COMMAND_TOKENS: frozenset[str] = frozenset(
         "use",
         "prune",
         "mcp",
+        "pkg:list",
+        "pkg:use",
+        "pkg:prune",
+        "pkg:remove",
+        "embed:add",
+        "embed:list",
+        "embed:remove",
+        "embed:set-default",
+        "embed:test",
+        "embed:status",
     }
 )
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 from cpm_cli import main as cli_main
 from cpm_core.build import DefaultBuilderConfig
 from cpm_core.packet.faiss_db import load_faiss_index
@@ -14,21 +16,6 @@ from cpm_core.packet.io import (
 )
 
 
-class _FakeHealthResponse:
-    ok = True
-
-
-class _FakeEmbedResponse:
-    def __init__(self, vectors: list[list[float]]):
-        self._vectors = vectors
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict[str, list[list[float]]]:
-        return {"vectors": self._vectors}
-
-
 def test_build_command_creates_packet(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "docs"
     project.mkdir()
@@ -37,20 +24,29 @@ def test_build_command_creates_packet(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    monkeypatch.setattr(
-        "cpm_core.build.builder.requests.get", lambda *args, **kwargs: _FakeHealthResponse()
-    )
+    monkeypatch.setattr("cpm_builtin.embeddings.client.EmbeddingClient.health", lambda self: True)
 
-    def fake_post(*args, **kwargs):
-        texts = kwargs["json"]["texts"]
+    def fake_embed_texts(
+        self,
+        texts,
+        *,
+        model_name: str,
+        max_seq_length: int,
+        normalize: bool,
+        dtype: str,
+        show_progress: bool,
+    ):
         dims = 4
         vectors = []
         for idx in range(len(texts)):
             vector = [1.0 if component == idx else 0.0 for component in range(dims)]
             vectors.append(vector)
-        return _FakeEmbedResponse(vectors)
+        return np.asarray(vectors, dtype=np.float32)
 
-    monkeypatch.setattr("cpm_core.build.builder.requests.post", fake_post)
+    monkeypatch.setattr(
+        "cpm_builtin.embeddings.client.EmbeddingClient.embed_texts",
+        fake_embed_texts,
+    )
 
     result = cli_main(
         ["build", "--source", "docs", "--packet-version", "1.2.3"], start_dir=tmp_path

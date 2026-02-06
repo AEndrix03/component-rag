@@ -25,9 +25,15 @@ class MCPServeCommand(CPMAbstractCommand):
             "--embed-url",
             help="Embedding server URL to expose to MCP clients.",
         )
+        parser.add_argument(
+            "--embeddings-mode",
+            choices=["http", "legacy"],
+            help="Embedding transport mode for query operations.",
+        )
 
     def run(self, argv: Sequence[str]) -> int:
         cpm_dir = getattr(argv, "cpm_dir", ".cpm")
         embed_url = getattr(argv, "embed_url", None)
-        run_server(cpm_dir=cpm_dir, embed_url=embed_url)
+        embed_mode = getattr(argv, "embeddings_mode", None)
+        run_server(cpm_dir=cpm_dir, embed_url=embed_url, embed_mode=embed_mode)
         return 0

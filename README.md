@@ -132,6 +132,43 @@ cpm init
 cpm doctor
 ```
 
+### Configure OpenAI-Compatible Embeddings Adapter
+
+Point CPM to an adapter exposing `POST /v1/embeddings`:
+
+```bash
+cpm embed add \
+  --name adapter-local \
+  --url http://127.0.0.1:8080 \
+  --model text-embedding-3-small \
+  --dims 768 \
+  --set-default
+```
+
+Minimal `.cpm/config/embeddings.yml` example:
+
+```yaml
+default: adapter-local
+providers:
+  - name: adapter-local
+    type: http
+    url: http://127.0.0.1:8080
+    model: text-embedding-3-small
+    dims: 768
+    http:
+      path: /v1/embeddings
+    hints:
+      normalize: true
+```
+
+Supported hint headers sent by CPM connector:
+- `X-Embedding-Dim`
+- `X-Embedding-Normalize`
+- `X-Embedding-Task`
+- `X-Model-Hint`
+
+See `cpm_builtin/embeddings/README.md` for full adapter spec, Docker Compose examples, and troubleshooting.
+
 ### Build Your First Packet
 
 ```bash

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
-import requests
+from cpm_builtin.embeddings import EmbeddingClient
 
 from cpm_core.api import CPMAbstractBuilder, cpmbuilder
 from cpm_core.packet.faiss_db import FaissFlatIP
@@ -61,47 +61,6 @@ class Embedder(Protocol):
         show_progress: bool,
     ) -> np.ndarray:
         ...
-
-
-class HttpEmbedder:
-    """HTTP client for the embedding pool server."""
-
-    def __init__(self, base_url: str, timeout_s: float | None = None) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.timeout_s = timeout_s
-
-    def health(self) -> bool:
-        try:
-            response = requests.get(f"{self.base_url}/health", timeout=2.0)
-            return response.ok
-        except Exception:
-            return False
-
-    def embed_texts(
-        self,
-        texts: Sequence[str],
-        *,
-        model_name: str,
-        max_seq_length: int,
-        normalize: bool,
-        dtype: str,
-        show_progress: bool,
-    ) -> np.ndarray:
-        payload = {
-            "model": model_name,
-            "texts": list(texts),
-            "options": {
-                "max_seq_length": int(max_seq_length),
-                "normalize": bool(normalize),
-                "show_progress": bool(show_progress),
-            },
-        }
-        response = requests.post(
-            f"{self.base_url}/embed", json=payload, timeout=self.timeout_s
-        )
-        response.raise_for_status()
-        data = response.json()
-        return np.array(data["vectors"], dtype=np.float32)
 
 
 def _chunk_hash(text: str) -> str:
@@ -321,6 +280,7 @@ class DefaultBuilderConfig:
     archive: bool = True
     archive_format: str = "tar.gz"
     embed_url: str = DEFAULT_EMBED_URL
+    embeddings_mode: str = "http"
     timeout: float | None = None
 
 
@@ -334,8 +294,10 @@ class DefaultBuilder(CPMAbstractBuilder):
         embedder: Embedder | None = None,
     ) -> None:
         self.config = config or DefaultBuilderConfig()
-        self.embedder = embedder or HttpEmbedder(
-            base_url=self.config.embed_url, timeout_s=self.config.timeout
+        self.embedder = embedder or EmbeddingClient(
+            base_url=self.config.embed_url,
+            mode=self.config.embeddings_mode,
+            timeout_s=self.config.timeout,
         )
 
     def build(self, source: str, *, destination: str | None = None) -> PacketManifest | None:
@@ -393,8 +355,11 @@ class DefaultBuilder(CPMAbstractBuilder):
         )
 
         if not self.embedder.health():
-            print(f"[error] embedding server not reachable at {self.config.embed_url}")
-            print("        - start it or override RAG_EMBED_URL")
+            print(
+                f"[error] embedding server not reachable at {self.config.embed_url} "
+                f"(mode={self.config.embeddings_mode})"
+            )
+            print("        - configure adapter URL or override RAG_EMBED_URL/RAG_EMBED_MODE")
             return None
 
         vec_missing: Optional[np.ndarray] = None

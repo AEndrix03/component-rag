@@ -9,6 +9,7 @@ from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException
 
 from cpm_builtin.embeddings.config import EmbeddingProviderConfig
+from cpm_builtin.embeddings.postprocess import is_l2_normalized, l2_normalize, prepare_embedding_matrix
 
 if TYPE_CHECKING:
     from typing import Protocol
@@ -30,11 +31,10 @@ class HttpEmbeddingConnector:
         self.provider = provider
         self.max_retries = max(1, max_retries)
         self._headers, self._auth = self._build_session_auth()
-        base = provider.url.rstrip("/")
-        self.endpoint = f"{base}/embed"
+        self.endpoint = f"{provider.resolved_http_base_url}{provider.resolved_http_path}"
 
     def _build_session_auth(self) -> tuple[dict[str, str], HTTPBasicAuth | None]:
-        headers = {str(k): str(v) for k, v in self.provider.headers.items()}
+        headers = self.provider.resolved_headers_static
         auth_entry = self.provider.auth
         auth_object: HTTPBasicAuth | None = None
 
@@ -51,11 +51,26 @@ class HttpEmbeddingConnector:
         elif isinstance(auth_entry, str):
             headers.setdefault("authorization", f"Bearer {auth_entry}")
 
+        headers.update(self._build_hint_headers())
         return headers, auth_object
+
+    def _build_hint_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.provider.resolved_hint_dim is not None:
+            headers["X-Embedding-Dim"] = str(self.provider.resolved_hint_dim)
+        if self.provider.hint_normalize is not None:
+            headers["X-Embedding-Normalize"] = (
+                "true" if self.provider.hint_normalize else "false"
+            )
+        if self.provider.hint_task:
+            headers["X-Embedding-Task"] = self.provider.hint_task
+        if self.provider.resolved_hint_model:
+            headers["X-Model-Hint"] = self.provider.resolved_hint_model
+        return headers
 
     def embed_texts(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:
-            return np.zeros((0, self.provider.dims or 0), dtype=np.float32)
+            return np.zeros((0, self.provider.resolved_hint_dim or 0), dtype=np.float32)
         batch_size = max(1, self.provider.batch_size or len(texts))
         batches = [
             list(texts[i : i + batch_size]) for i in range(0, len(texts), batch_size)
@@ -63,13 +78,17 @@ class HttpEmbeddingConnector:
         pieces: list[np.ndarray] = []
         for batch in batches:
             pieces.append(self._embed_batch(batch))
-        return np.vstack(pieces) if pieces else np.zeros((0, self.provider.dims or 0), dtype=np.float32)
+        return (
+            np.vstack(pieces)
+            if pieces
+            else np.zeros((0, self.provider.resolved_hint_dim or 0), dtype=np.float32)
+        )
 
     def _embed_batch(self, batch: list[str]) -> np.ndarray:
-        timeout = float(self.provider.timeout) if self.provider.timeout else 10.0
+        timeout = self.provider.resolved_http_timeout or 10.0
         payload: dict[str, object] = {"texts": batch}
-        if self.provider.model:
-            payload["model"] = self.provider.model
+        if self.provider.resolved_hint_model:
+            payload["model"] = self.provider.resolved_hint_model
         if self.provider.extra:
             payload["extra"] = self.provider.extra
 
@@ -98,18 +117,22 @@ class HttpEmbeddingConnector:
         raise RuntimeError("failed to send request") from last_error
 
     def _prepare_array(self, vectors: Sequence[Sequence[float]]) -> np.ndarray:
-        dims = self.provider.dims
-        if not vectors:
-            return np.zeros((0, dims or 0), dtype=np.float32)
-        expected = len(vectors[0])
-        if dims and expected != dims:
-            raise ValueError("response vector does not match expected dims")
-        for row in vectors:
-            if len(row) != expected:
-                raise ValueError("inconsistent vector dimensions")
-            if dims and len(row) != dims:
-                raise ValueError("vector length does not line up with config dims")
-        array = np.asarray(vectors, dtype=np.float32)
-        if dims and array.shape[1] != dims:
-            raise ValueError("final embedding matrix geometry mismatch")
+        mode = self.provider.normalize_mode
+        if mode not in {"server", "client", "auto"}:
+            raise ValueError("normalize_mode must be one of: server, client, auto")
+
+        normalize_requested = self.provider.hint_normalize is True
+
+        array, _dim = prepare_embedding_matrix(
+            vectors,
+            expected_dim=self.provider.resolved_hint_dim,
+            normalize=False,
+            fail_on_non_finite=True,
+        )
+
+        server_does_not_guarantee_normalized = (
+            mode == "client" or (mode == "auto" and not is_l2_normalized(array))
+        )
+        if normalize_requested and server_does_not_guarantee_normalized:
+            array = l2_normalize(array)
         return array
