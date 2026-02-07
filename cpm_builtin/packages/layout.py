@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .versions import split_version_parts
-
 __all__ = [
     "active_root",
     "pins_root",
@@ -37,5 +35,10 @@ def active_root(root: Path) -> Path:
 
 
 def version_dir(root: Path, name: str, version: str) -> Path:
-    parts = split_version_parts(version)
-    return packages_root(root) / name / Path(*parts)
+    normalized_name = (name or "").strip()
+    normalized_version = (version or "").strip()
+    if not normalized_name:
+        raise ValueError("package name is required")
+    if not normalized_version:
+        raise ValueError("package version is required")
+    return packages_root(root) / normalized_name / normalized_version

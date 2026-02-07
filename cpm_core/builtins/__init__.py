@@ -16,6 +16,7 @@ from .commands import (
 )
 from .pkg import PkgCommand
 from .query import QueryCommand, register_builtin_retrievers
+from .lookup import LookupCommand
 
 __all__ = [
     "register_builtin_commands",
@@ -30,6 +31,7 @@ _BUILTIN_FEATURES: Sequence[type] = (
     PluginListCommand,
     PluginDoctorCommand,
     PkgCommand,
+    LookupCommand,
     HelpCommand,
     ListingCommand,
 )

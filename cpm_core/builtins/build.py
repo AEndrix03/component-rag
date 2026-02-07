@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from argparse import ArgumentParser
@@ -66,10 +67,44 @@ def _as_bool(value: Any, default: bool) -> bool:
     return default
 
 
+def _read_simple_yml(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return out
+    except UnicodeDecodeError:
+        lines = path.read_text(encoding="latin-1").splitlines()
+
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            out[key] = value
+    return out
+
+
+def _write_simple_yml(path: Path, kv: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for key, value in kv.items():
+            handle.write(f"{key}: {value}\n")
+
+
 @dataclass(frozen=True)
 class _BuildInvocation:
     source: Path
-    destination: Path
+    destination_root: Path
+    packet_dir: Path
+    packet_name: str
+    packet_version: str
+    description: str
     config: DefaultBuilderConfig
     builder: str
 
@@ -83,18 +118,23 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     embeddings_data = config_data.get("embeddings") or {}
     chunking_data = config_data.get("chunking") or {}
 
+    packet_name = _as_str(getattr(argv, "name", None), _as_str(output_data.get("name"), "")).strip()
+    packet_version = _as_str(
+        getattr(argv, "packet_version", None),
+        _as_str(output_data.get("version"), ""),
+    ).strip()
+    description = _as_str(getattr(argv, "description", None), _as_str(output_data.get("description"), "")).strip()
+
     cli_source = getattr(argv, "source", None)
     source_dir = Path(_as_str(cli_source, _as_str(source_data.get("dir"), "."))).resolve()
 
     cli_dest = getattr(argv, "destination", None)
     if cli_dest:
-        destination = Path(cli_dest).resolve()
+        destination_root = Path(cli_dest).resolve()
     else:
-        output_dir = _as_str(output_data.get("dir"), "")
-        if output_dir:
-            destination = Path(output_dir).resolve()
-        else:
-            destination = workspace_root / "packages" / source_dir.name
+        output_dir = _as_str(output_data.get("dir"), "dist")
+        destination_root = (workspace_root / output_dir).resolve()
+    packet_dir = destination_root / packet_name / packet_version
 
     cli_model = getattr(argv, "model", None)
     model_name = _as_str(
@@ -120,14 +160,8 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
         _as_int(chunking_data.get("overlap_lines"), DefaultBuilderConfig().overlap_lines),
     )
 
-    cli_version = getattr(argv, "packet_version", None)
-    version = _as_str(
-        cli_version,
-        _as_str(output_data.get("version"), DefaultBuilderConfig().version),
-    )
-
     archive = not getattr(argv, "no_archive", False)
-    if archive and output_data:
+    if output_data:
         archive = _as_bool(output_data.get("archive"), archive)
     archive_format = getattr(argv, "archive_format", None) or _as_str(
         output_data.get("archive_format"), DefaultBuilderConfig().archive_format
@@ -168,7 +202,9 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
         max_seq_length=max_seq_length,
         lines_per_chunk=lines_per_chunk,
         overlap_lines=overlap_lines,
-        version=version,
+        version=packet_version,
+        packet_name=packet_name,
+        description=description or None,
         archive=archive,
         archive_format=archive_format,
         embed_url=embed_url,
@@ -178,7 +214,11 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
 
     return _BuildInvocation(
         source=source_dir,
-        destination=destination,
+        destination_root=destination_root,
+        packet_dir=packet_dir,
+        packet_name=packet_name,
+        packet_version=packet_version,
+        description=description,
         config=builder_config,
         builder=_as_str(getattr(argv, "builder", None), "cpm:default-builder"),
     )
@@ -209,41 +249,109 @@ def _resolve_builder_entry(spec: str, workspace_root: Path) -> CPMRegistryEntry 
     return entry
 
 
+def _update_packet_description(packet_dir: Path, description: str) -> int:
+    if not packet_dir.exists():
+        print(f"[cpm:build] packet directory not found: {packet_dir}")
+        return 1
+
+    cpm_yml_path = packet_dir / "cpm.yml"
+    data = _read_simple_yml(cpm_yml_path)
+    if data:
+        data["description"] = description
+        _write_simple_yml(cpm_yml_path, data)
+
+    manifest_path = packet_dir / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[cpm:build] invalid manifest.json: {exc}")
+            return 1
+        cpm = manifest.get("cpm") if isinstance(manifest.get("cpm"), dict) else {}
+        cpm["description"] = description
+        manifest["cpm"] = cpm
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"[cpm:build] description updated for {packet_dir}")
+    return 0
+
+
 @cpmcommand(name="build", group="cpm")
 class BuildCommand(_WorkspaceAwareCommand):
-    """Build context packets from workspace sources."""
+    """Build and manage context packets."""
+
+    @classmethod
+    def _configure_run_options(cls, parser: ArgumentParser, *, required: bool) -> None:
+        parser.add_argument("--builder", default="cpm:default-builder", help="Builder name or group:name")
+        parser.add_argument("--source", default=".", help="Source directory (default: current dir)")
+        parser.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
+        parser.add_argument("--name", required=required, help="Packet name")
+        parser.add_argument("--packet-version", dest="packet_version", required=required, help="Packet version")
+        parser.add_argument("--description", help="Packet description")
+        parser.add_argument("--model", help="Embedding model identifier")
+        parser.add_argument("--max-seq-length", type=int, help="Maximum tokens per chunk")
+        parser.add_argument("--lines-per-chunk", type=int, help="Number of lines per chunk")
+        parser.add_argument("--overlap-lines", type=int, help="Overlap lines between chunks")
+        parser.add_argument("--archive-format", choices=SUPPORTED_ARCHIVE_FORMATS)
+        parser.add_argument("--no-archive", action="store_true")
+        parser.add_argument("--embed-url", help="Embedding server URL")
+        parser.add_argument("--embeddings-mode", choices=VALID_EMBEDDING_MODES, help="Embedding transport mode")
+        parser.add_argument("--timeout", type=float, help="Embedding request timeout (seconds)")
 
     @classmethod
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--workspace-dir", default=".", help="Workspace root (default: current dir)")
         parser.add_argument("--config", help="Path to build config TOML")
-        parser.add_argument(
-            "--builder",
-            default="cpm:default-builder",
-            help="Builder to use (name or group:name), e.g. cpm:default-builder or llm:cpm-llm-builder",
-        )
-        parser.add_argument("--source", default=".", help="Directory that holds source files")
-        parser.add_argument("--destination", help="Packet output directory")
-        parser.add_argument("--model", help="Embedding model identifier")
-        parser.add_argument("--max-seq-length", type=int, help="Maximum tokens per chunk")
-        parser.add_argument("--lines-per-chunk", type=int, help="Number of lines per chunk")
-        parser.add_argument("--overlap-lines", type=int, help="Overlap lines between chunks")
-        parser.add_argument("--packet-version", dest="packet_version", help="Packet version")
-        parser.add_argument("--archive-format", choices=SUPPORTED_ARCHIVE_FORMATS)
-        parser.add_argument("--no-archive", action="store_true")
-        parser.add_argument("--embed-url", help="Embedding server URL")
-        parser.add_argument(
-            "--embeddings-mode",
-            choices=VALID_EMBEDDING_MODES,
-            help="Embedding transport mode (http). Default: http",
-        )
-        parser.add_argument("--timeout", type=float, help="Embedding request timeout (seconds)")
+        cls._configure_run_options(parser, required=False)
+
+        sub = parser.add_subparsers(dest="build_cmd")
+
+        run = sub.add_parser("run", help="Build a packet")
+        cls._configure_run_options(run, required=True)
+
+        describe = sub.add_parser("describe", help="Set or update packet description")
+        describe.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
+        describe.add_argument("--name", required=True, help="Packet name")
+        describe.add_argument("--packet-version", dest="packet_version", required=True, help="Packet version")
+        describe.add_argument("--description", required=True, help="Description text")
+
+        inspect = sub.add_parser("inspect", help="Print resolved packet path")
+        inspect.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
+        inspect.add_argument("--name", required=True, help="Packet name")
+        inspect.add_argument("--packet-version", dest="packet_version", required=True, help="Packet version")
+
+        parser.set_defaults(build_cmd="run")
 
     def run(self, argv: Any) -> int:
         requested_dir = getattr(argv, "workspace_dir", None)
         workspace_root = self._resolve(requested_dir)
         self.workspace_root = workspace_root
+
+        action = str(getattr(argv, "build_cmd", "run") or "run")
+        if action == "describe":
+            destination = Path(str(getattr(argv, "destination", "dist") or "dist"))
+            root = destination if destination.is_absolute() else (workspace_root / destination)
+            packet_dir = root / str(getattr(argv, "name", "")) / str(getattr(argv, "packet_version", ""))
+            return _update_packet_description(packet_dir, str(getattr(argv, "description", "")).strip())
+
+        if action == "inspect":
+            destination = Path(str(getattr(argv, "destination", "dist") or "dist"))
+            root = destination if destination.is_absolute() else (workspace_root / destination)
+            packet_dir = root / str(getattr(argv, "name", "")) / str(getattr(argv, "packet_version", ""))
+            print(f"[cpm:build] packet_dir={packet_dir.resolve()}")
+            print(f"[cpm:build] exists={packet_dir.exists()}")
+            return 0
+
         invocation = _merge_invocation(argv, workspace_root)
+        if not invocation.packet_name:
+            print("[cpm:build] --name is required")
+            return 1
+        if not invocation.packet_version:
+            print("[cpm:build] --packet-version is required")
+            return 1
+
+        invocation.destination_root.mkdir(parents=True, exist_ok=True)
+
         builder_entry = _resolve_builder_entry(invocation.builder, workspace_root)
         if builder_entry is None:
             print(f"[error] builder '{invocation.builder}' not found in registry")
@@ -257,22 +365,22 @@ class BuildCommand(_WorkspaceAwareCommand):
             builder = builder_cls(config=invocation.config)
             manifest = builder.build(
                 str(invocation.source),
-                destination=str(invocation.destination),
+                destination=str(invocation.packet_dir),
             )
-            if manifest is None:
-                return 1
-            return 0
+            return 0 if manifest is not None else 1
 
         builder = builder_cls()
+        setattr(argv, "destination", str(invocation.packet_dir))
+        setattr(argv, "source", str(invocation.source))
+        setattr(argv, "packet_version", invocation.packet_version)
+        setattr(argv, "name", invocation.packet_name)
+        setattr(argv, "description", invocation.description)
+
         run_method = getattr(builder, "run", None)
         if callable(run_method):
-            # Plugin builders can expose a command-like run() to parse extra options.
             return int(run_method(argv))
 
-        manifest = builder.build(
-            str(invocation.source),
-            destination=str(invocation.destination),
-        )
+        manifest = builder.build(str(invocation.source), destination=str(invocation.packet_dir))
         if builder_entry.origin == "builtin" and manifest is None:
             return 1
         return 0

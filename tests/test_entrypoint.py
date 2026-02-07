@@ -14,14 +14,14 @@ def test_console_module_entrypoint_delegates_to_cli_main(monkeypatch):
     assert cli_entry.main() == 7
 
 
-def test_dispatch_rejects_removed_lookup_alias(
+def test_dispatch_supports_lookup_command(
     tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
     code = cli_main.main(["lookup"], start_dir=tmp_path)
 
-    assert code == 1
-    assert "lookup" in capsys.readouterr().out
+    assert code == 0
+    assert "[cpm:lookup]" in capsys.readouterr().out
 
 
 def test_dispatch_rejects_removed_legacy_alias(

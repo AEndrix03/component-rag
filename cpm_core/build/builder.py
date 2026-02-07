@@ -9,7 +9,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Protocol, Sequence, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
 from cpm_builtin.embeddings import EmbeddingClient
@@ -102,12 +102,13 @@ def _scan_source(
             _chunk_text(text, lines_per_chunk=lines_per_chunk, overlap_lines=overlap_lines)
         )
         for chunk_text in file_chunks:
-            chunk = DocChunk(
-                id=f"{rel}:{chunk_counter}",
-                text=chunk_text,
-                metadata={"path": rel, "ext": ext},
+            chunks.append(
+                DocChunk(
+                    id=f"{rel}:{chunk_counter}",
+                    text=chunk_text,
+                    metadata={"path": rel, "ext": ext},
+                )
             )
-            chunks.append(chunk)
             chunk_counter += 1
     return chunks, ext_counts, files_indexed
 
@@ -181,7 +182,7 @@ def _write_cpm_yml(
     def esc(value: str) -> str:
         if any(ch in value for ch in [":", "#", "\n", "\r", "\t"]):
             value = value.replace('"', '\\"')
-            return f"\"{value}\""
+            return f'"{value}"'
         return value
 
     cpm_path = out_root / "cpm.yml"
@@ -198,7 +199,6 @@ def _write_cpm_yml(
             f"embedding_normalized: {'true' if embedding_normalized else 'false'}\n"
         )
         handle.write(f"created_at: {esc(created_at)}\n")
-    print(f"[write] cpm.yml -> {cpm_path}")
 
 
 def _archive_packet_dir(out_root: Path, archive_format: str) -> Path:
@@ -271,17 +271,225 @@ def _load_existing_cache(
 
 
 @dataclass(frozen=True)
+class PacketMaterializationInput:
+    source_path: Path
+    out_root: Path
+    packet_name: str
+    packet_version: str
+    description: str
+    chunks: Sequence[DocChunk]
+    ext_counts: Mapping[str, int]
+    model_name: str
+    max_seq_length: int
+    archive: bool
+    archive_format: str
+    builder_name: str
+    embedder: Embedder
+    incremental_enabled: bool = True
+    extra_files: Sequence[str] = ()
+    extra_manifest: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class DefaultBuilderConfig:
     model_name: str = DEFAULT_MODEL
     max_seq_length: int = 1024
     lines_per_chunk: int = 80
     overlap_lines: int = 10
     version: str = "0.0.0"
+    packet_name: str = "packet"
+    description: str | None = None
     archive: bool = True
     archive_format: str = "tar.gz"
     embed_url: str = DEFAULT_EMBED_URL
     embeddings_mode: str = "http"
     timeout: float | None = None
+
+
+def materialize_packet(input_data: PacketMaterializationInput) -> PacketManifest | None:
+    chunks = list(input_data.chunks)
+    if not chunks:
+        print("[error] No chunks found.")
+        return None
+
+    out_root = input_data.out_root.resolve()
+    out_root.mkdir(parents=True, exist_ok=True)
+    (out_root / "faiss").mkdir(parents=True, exist_ok=True)
+
+    cache_pack = None
+    if input_data.incremental_enabled:
+        cache_pack = _load_existing_cache(
+            out_root,
+            model_name=input_data.model_name,
+            max_seq_length=input_data.max_seq_length,
+        )
+    cache_vecs: Dict[str, np.ndarray] = {}
+    cache_dim: Optional[int] = None
+    if cache_pack:
+        cache_vecs, cache_dim = cache_pack
+        print(f"[cache] enabled: cached_vectors={len(cache_vecs)} dim={cache_dim}")
+    else:
+        print("[cache] disabled (no compatible previous build found)")
+
+    new_hashes = [_chunk_hash(chunk.text) for chunk in chunks]
+    new_set = set(new_hashes)
+    prev_set = set(cache_vecs.keys())
+    removed = len(prev_set - new_set) if cache_vecs else 0
+    reused = sum(1 for h in new_hashes if h in cache_vecs)
+
+    to_embed_idx: list[int] = []
+    to_embed_texts: list[str] = []
+    for idx, hsh in enumerate(new_hashes):
+        if hsh not in cache_vecs:
+            to_embed_idx.append(idx)
+            to_embed_texts.append(chunks[idx].text)
+
+    print(
+        f"[cache] new_chunks={len(chunks)} reused={reused} to_embed={len(to_embed_idx)} removed={removed}"
+    )
+
+    if not input_data.embedder.health():
+        print("[error] embedding server is not reachable")
+        return None
+
+    vec_missing: Optional[np.ndarray] = None
+    dim: Optional[int] = cache_dim
+    if to_embed_texts:
+        vec_missing = input_data.embedder.embed_texts(
+            to_embed_texts,
+            model_name=input_data.model_name,
+            max_seq_length=input_data.max_seq_length,
+            normalize=True,
+            dtype="float32",
+            show_progress=True,
+        )
+        dim = int(vec_missing.shape[1])
+    elif dim is None and chunks:
+        vec_missing = input_data.embedder.embed_texts(
+            [chunks[0].text],
+            model_name=input_data.model_name,
+            max_seq_length=input_data.max_seq_length,
+            normalize=True,
+            dtype="float32",
+            show_progress=False,
+        )
+        dim = int(vec_missing.shape[1])
+        to_embed_idx = [0]
+
+    assert dim is not None
+
+    if cache_dim is not None and cache_dim != dim:
+        print(f"[cache] dim mismatch: cache_dim={cache_dim} new_dim={dim} -> cache disabled")
+        cache_vecs = {}
+        reused = 0
+        to_embed_idx = list(range(len(chunks)))
+        to_embed_texts = [chunk.text for chunk in chunks]
+        vec_missing = input_data.embedder.embed_texts(
+            to_embed_texts,
+            model_name=input_data.model_name,
+            max_seq_length=input_data.max_seq_length,
+            normalize=True,
+            dtype="float32",
+            show_progress=True,
+        )
+        dim = int(vec_missing.shape[1])
+
+    final_vecs = np.empty((len(chunks), dim), dtype=np.float32)
+    if cache_vecs:
+        for idx, hsh in enumerate(new_hashes):
+            vector = cache_vecs.get(hsh)
+            if vector is not None:
+                final_vecs[idx] = vector
+
+    if to_embed_idx:
+        assert vec_missing is not None
+        for missing_idx, chunk_idx in enumerate(to_embed_idx):
+            final_vecs[chunk_idx] = vec_missing[missing_idx]
+
+    docs_path = out_root / "docs.jsonl"
+    write_docs_jsonl(chunks, docs_path)
+    print(f"[write] docs.jsonl -> {docs_path} ({len(chunks)} lines)")
+
+    db = FaissFlatIP(dim=dim)
+    db.add(final_vecs)
+    db_path = out_root / "faiss" / "index.faiss"
+    db.save(str(db_path))
+    print(f"[write] faiss/index.faiss -> {db_path}")
+
+    vectors_path = out_root / "vectors.f16.bin"
+    write_vectors_f16(final_vecs, vectors_path)
+    print(f"[write] vectors.f16.bin -> {vectors_path}")
+
+    tags = _infer_tags(dict(input_data.ext_counts))
+    _write_cpm_yml(
+        out_root,
+        name=input_data.packet_name,
+        version=input_data.packet_version,
+        description=input_data.description,
+        tags=tags,
+        entrypoints=["query"],
+        embedding_model=input_data.model_name,
+        embedding_dim=dim,
+        embedding_normalized=True,
+    )
+
+    manifest = PacketManifest(
+        schema_version="1.0",
+        packet_id=input_data.packet_name,
+        embedding=EmbeddingSpec(
+            provider="sentence-transformers",
+            model=input_data.model_name,
+            dim=dim,
+            dtype="float16",
+            normalized=True,
+            max_seq_length=input_data.max_seq_length,
+        ),
+        similarity={
+            "space": "cosine",
+            "index_type": "faiss.IndexFlatIP",
+            "notes": "cosine via inner product on normalized vectors",
+        },
+        files={
+            "docs": "docs.jsonl",
+            "vectors": {"path": "vectors.f16.bin", "format": "f16_rowmajor"},
+            "index": {"path": "faiss/index.faiss", "format": "faiss"},
+            "calibration": None,
+        },
+        counts={"docs": len(chunks), "vectors": int(db.index.ntotal)},
+        source={
+            "input_dir": input_data.source_path.as_posix(),
+            "file_ext_counts": dict(input_data.ext_counts),
+        },
+        cpm={
+            "name": input_data.packet_name,
+            "version": input_data.packet_version,
+            "description": input_data.description,
+            "tags": tags,
+            "entrypoints": ["query"],
+            "builder": input_data.builder_name,
+        },
+        incremental={
+            "enabled": bool(cache_pack),
+            "reused": reused,
+            "embedded": len(to_embed_idx),
+            "removed": removed,
+        },
+    )
+    if input_data.extra_manifest:
+        manifest.extras.update(dict(input_data.extra_manifest))
+
+    checksum_targets = ["cpm.yml", "docs.jsonl", "vectors.f16.bin", "faiss/index.faiss", *input_data.extra_files]
+    manifest.checksums = compute_checksums(out_root, checksum_targets)
+    manifest_path = out_root / "manifest.json"
+    write_manifest(manifest, manifest_path)
+    print(f"[write] manifest.json -> {manifest_path}")
+
+    if input_data.archive:
+        archive_path = _archive_packet_dir(out_root, input_data.archive_format)
+        print(f"[write] archive -> {archive_path}")
+
+    print("[done] build ok")
+    return manifest
 
 
 @cpmbuilder(name="default-builder", group="cpm")
@@ -307,11 +515,10 @@ class DefaultBuilder(CPMAbstractBuilder):
             return None
         if destination is None:
             raise ValueError("destination path must be provided")
+
         out_root = Path(destination).resolve()
         print(f"[build] input_dir  = {source_path}")
         print(f"[build] output_dir = {out_root}")
-        out_root.mkdir(parents=True, exist_ok=True)
-        (out_root / "faiss").mkdir(parents=True, exist_ok=True)
 
         chunks, ext_counts, files_indexed = _scan_source(
             source_path,
@@ -320,188 +527,23 @@ class DefaultBuilder(CPMAbstractBuilder):
         )
         print(f"[scan] files_indexed={files_indexed}")
         print(f"[scan] chunks_total={len(chunks)}")
-        if not chunks:
-            print("[error] No chunks found.")
-            return None
 
-        cache_pack = _load_existing_cache(
-            out_root,
-            model_name=self.config.model_name,
-            max_seq_length=self.config.max_seq_length,
-        )
-        cache_vecs: Dict[str, np.ndarray] = {}
-        cache_dim: Optional[int] = None
-        if cache_pack:
-            cache_vecs, cache_dim = cache_pack
-            print(f"[cache] enabled: cached_vectors={len(cache_vecs)} dim={cache_dim}")
-        else:
-            print("[cache] disabled (no compatible previous build found)")
-
-        new_hashes = [_chunk_hash(chunk.text) for chunk in chunks]
-        new_set = set(new_hashes)
-        prev_set = set(cache_vecs.keys())
-        removed = len(prev_set - new_set) if cache_vecs else 0
-        reused = sum(1 for h in new_hashes if h in cache_vecs)
-
-        to_embed_idx: list[int] = []
-        to_embed_texts: list[str] = []
-        for idx, (chunk, hsh) in enumerate(zip(chunks, new_hashes)):
-            if hsh not in cache_vecs:
-                to_embed_idx.append(idx)
-                to_embed_texts.append(chunk.text)
-
-        print(
-            f"[cache] new_chunks={len(chunks)} reused={reused} to_embed={len(to_embed_idx)} removed={removed}"
-        )
-
-        if not self.embedder.health():
-            print(
-                f"[error] embedding server not reachable at {self.config.embed_url} "
-                f"(mode={self.config.embeddings_mode})"
-            )
-            print("        - configure adapter URL or override RAG_EMBED_URL/RAG_EMBED_MODE")
-            return None
-
-        vec_missing: Optional[np.ndarray] = None
-        dim: Optional[int] = cache_dim
-        if to_embed_texts:
-            vec_missing = self.embedder.embed_texts(
-                to_embed_texts,
+        description = (self.config.description or source_path.as_posix()).strip() or source_path.as_posix()
+        return materialize_packet(
+            PacketMaterializationInput(
+                source_path=source_path,
+                out_root=out_root,
+                packet_name=self.config.packet_name,
+                packet_version=self.config.version,
+                description=description,
+                chunks=chunks,
+                ext_counts=ext_counts,
                 model_name=self.config.model_name,
                 max_seq_length=self.config.max_seq_length,
-                normalize=True,
-                dtype="float32",
-                show_progress=True,
+                archive=self.config.archive,
+                archive_format=self.config.archive_format,
+                builder_name="cpm:default-builder",
+                embedder=self.embedder,
+                incremental_enabled=True,
             )
-            dim = int(vec_missing.shape[1])
-            print(f"[embed] missing_vectors shape={vec_missing.shape} dtype={vec_missing.dtype}")
-        elif dim is None and chunks:
-            vec_missing = self.embedder.embed_texts(
-                [chunks[0].text],
-                model_name=self.config.model_name,
-                max_seq_length=self.config.max_seq_length,
-                normalize=True,
-                dtype="float32",
-                show_progress=False,
-            )
-            dim = int(vec_missing.shape[1])
-            to_embed_idx = [0]
-            print(f"[embed] dim inferred by 1-shot: dim={dim}")
-
-        assert dim is not None
-
-        if cache_dim is not None and cache_dim != dim:
-            print(
-                f"[cache] dim mismatch: cache_dim={cache_dim} new_dim={dim} -> cache disabled"
-            )
-            cache_vecs = {}
-            reused = 0
-            to_embed_idx = list(range(len(chunks)))
-            to_embed_texts = [chunk.text for chunk in chunks]
-            vec_missing = self.embedder.embed_texts(
-                to_embed_texts,
-                model_name=self.config.model_name,
-                max_seq_length=self.config.max_seq_length,
-                normalize=True,
-                dtype="float32",
-                show_progress=True,
-            )
-            dim = int(vec_missing.shape[1])
-
-        final_vecs = np.empty((len(chunks), dim), dtype=np.float32)
-        if cache_vecs:
-            for idx, hsh in enumerate(new_hashes):
-                vector = cache_vecs.get(hsh)
-                if vector is not None:
-                    final_vecs[idx] = vector
-
-        if to_embed_idx:
-            assert vec_missing is not None
-            for missing_idx, chunk_idx in enumerate(to_embed_idx):
-                final_vecs[chunk_idx] = vec_missing[missing_idx]
-
-        print(f"[embed] final vectors shape={final_vecs.shape} dtype={final_vecs.dtype}")
-
-        docs_path = out_root / "docs.jsonl"
-        write_docs_jsonl(chunks, docs_path)
-        print(f"[write] docs.jsonl -> {docs_path} ({len(chunks)} lines)")
-
-        db = FaissFlatIP(dim=dim)
-        db.add(final_vecs)
-        print(f"[faiss] ntotal={db.index.ntotal}")
-        db_path = out_root / "faiss" / "index.faiss"
-        db.save(str(db_path))
-        print(f"[write] faiss/index.faiss -> {db_path}")
-
-        vectors_path = out_root / "vectors.f16.bin"
-        write_vectors_f16(final_vecs, vectors_path)
-        print(f"[write] vectors.f16.bin -> {vectors_path}")
-
-        tags = _infer_tags(ext_counts)
-        description = source_path.as_posix()
-        _write_cpm_yml(
-            out_root,
-            name=out_root.name,
-            version=self.config.version,
-            description=description,
-            tags=tags,
-            entrypoints=["query"],
-            embedding_model=self.config.model_name,
-            embedding_dim=dim,
-            embedding_normalized=True,
         )
-
-        manifest = PacketManifest(
-            schema_version="1.0",
-            packet_id=out_root.name,
-            embedding=EmbeddingSpec(
-                provider="sentence-transformers",
-                model=self.config.model_name,
-                dim=dim,
-                dtype="float16",
-                normalized=True,
-                max_seq_length=self.config.max_seq_length,
-            ),
-            similarity={
-                "space": "cosine",
-                "index_type": "faiss.IndexFlatIP",
-                "notes": "cosine via inner product on normalized vectors",
-            },
-            files={
-                "docs": "docs.jsonl",
-                "vectors": {"path": "vectors.f16.bin", "format": "f16_rowmajor"},
-                "index": {"path": "faiss/index.faiss", "format": "faiss"},
-                "calibration": None,
-            },
-            counts={"docs": len(chunks), "vectors": int(db.index.ntotal)},
-            source={
-                "input_dir": source_path.as_posix(),
-                "file_ext_counts": ext_counts,
-            },
-            cpm={
-                "name": out_root.name,
-                "version": self.config.version,
-                "tags": tags,
-                "entrypoints": ["query"],
-            },
-            incremental={
-                "enabled": cache_pack is not None,
-                "reused": reused,
-                "embedded": len(to_embed_idx),
-                "removed": removed,
-            },
-        )
-        manifest.checksums = compute_checksums(
-            out_root,
-            ["cpm.yml", "docs.jsonl", "vectors.f16.bin", "faiss/index.faiss"],
-        )
-        manifest_path = out_root / "manifest.json"
-        write_manifest(manifest, manifest_path)
-        print(f"[write] manifest.json -> {manifest_path}")
-
-        if self.config.archive:
-            archive_path = _archive_packet_dir(out_root, self.config.archive_format)
-            print(f"[write] archive -> {archive_path}")
-
-        print("[done] build ok")
-        return manifest

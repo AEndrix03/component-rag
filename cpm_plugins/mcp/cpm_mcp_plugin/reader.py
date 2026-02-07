@@ -266,8 +266,10 @@ class PacketReader:
         return self.root / name
 
     def _version_dir(self, name: str, version: str) -> Path:
-        parts = split_version_parts(version)
-        return self._packet_root(name).joinpath(*parts)
+        normalized = (version or "").strip()
+        if not normalized:
+            raise ValueError("empty version")
+        return self._packet_root(name) / normalized
 
     def _packet_pin_path(self, name: str) -> Path:
         return self._packet_root(name) / "cpm.yml"

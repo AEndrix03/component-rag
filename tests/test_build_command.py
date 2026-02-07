@@ -50,11 +50,21 @@ def test_build_command_creates_packet(tmp_path: Path, monkeypatch) -> None:
     )
 
     result = cli_main(
-        ["build", "--source", "docs", "--packet-version", "1.2.3"], start_dir=tmp_path
+        [
+            "build",
+            "run",
+            "--source",
+            "docs",
+            "--name",
+            "docs",
+            "--packet-version",
+            "1.2.3",
+        ],
+        start_dir=tmp_path,
     )
     assert result == 0
 
-    packet_dir = tmp_path / ".cpm" / "packages" / "docs"
+    packet_dir = tmp_path / "dist" / "docs" / "1.2.3"
     manifest = load_manifest(packet_dir / "manifest.json")
     assert manifest.cpm["version"] == "1.2.3"
     assert manifest.embedding.model == DefaultBuilderConfig().model_name
@@ -88,10 +98,15 @@ def test_build_command_can_select_plugin_builder(tmp_path: Path, monkeypatch) ->
     result = cli_main(
         [
             "build",
+            "run",
             "--source",
             "docs",
             "--destination",
             str(tmp_path / "out"),
+            "--name",
+            "docs",
+            "--packet-version",
+            "0.0.1",
             "--builder",
             "sample:sample-builder",
         ],
