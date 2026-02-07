@@ -12,7 +12,7 @@ from typing import Any
 from cpm_core.api import cpmcommand
 from cpm_builtin.embeddings import VALID_EMBEDDING_MODES
 from cpm_core.build import DefaultBuilder, DefaultBuilderConfig
-from cpm_core.registry import CPMRegistryEntry, FeatureRegistry
+from cpm_core.registry import AmbiguousFeatureError, CPMRegistryEntry, FeatureNotFoundError, FeatureRegistry
 from .commands import _WorkspaceAwareCommand
 
 BUILD_CONFIG_FILE = "build.toml"
@@ -71,6 +71,7 @@ class _BuildInvocation:
     source: Path
     destination: Path
     config: DefaultBuilderConfig
+    builder: str
 
 
 def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
@@ -179,7 +180,33 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
         source=source_dir,
         destination=destination,
         config=builder_config,
+        builder=_as_str(getattr(argv, "builder", None), "cpm:default-builder"),
     )
+
+
+def _list_builder_specs(workspace_root: Path) -> list[str]:
+    from cpm_core.app import CPMApp
+
+    app = CPMApp(start_dir=workspace_root)
+    app.bootstrap()
+    entries = [entry for entry in app.feature_registry.entries() if entry.kind == "builder"]
+    names = sorted({entry.name for entry in entries})
+    qualified = sorted(entry.qualified_name for entry in entries)
+    return sorted(set(names + qualified))
+
+
+def _resolve_builder_entry(spec: str, workspace_root: Path) -> CPMRegistryEntry | None:
+    from cpm_core.app import CPMApp
+
+    app = CPMApp(start_dir=workspace_root)
+    app.bootstrap()
+    try:
+        entry = app.feature_registry.resolve(spec)
+    except (FeatureNotFoundError, AmbiguousFeatureError):
+        return None
+    if entry.kind != "builder":
+        return None
+    return entry
 
 
 @cpmcommand(name="build", group="cpm")
@@ -190,6 +217,11 @@ class BuildCommand(_WorkspaceAwareCommand):
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--workspace-dir", default=".", help="Workspace root (default: current dir)")
         parser.add_argument("--config", help="Path to build config TOML")
+        parser.add_argument(
+            "--builder",
+            default="cpm:default-builder",
+            help="Builder to use (name or group:name), e.g. cpm:default-builder or llm:cpm-llm-builder",
+        )
         parser.add_argument("--source", default=".", help="Directory that holds source files")
         parser.add_argument("--destination", help="Packet output directory")
         parser.add_argument("--model", help="Embedding model identifier")
@@ -212,12 +244,36 @@ class BuildCommand(_WorkspaceAwareCommand):
         workspace_root = self._resolve(requested_dir)
         self.workspace_root = workspace_root
         invocation = _merge_invocation(argv, workspace_root)
-        builder = DefaultBuilder(config=invocation.config)
+        builder_entry = _resolve_builder_entry(invocation.builder, workspace_root)
+        if builder_entry is None:
+            print(f"[error] builder '{invocation.builder}' not found in registry")
+            available = _list_builder_specs(workspace_root)
+            if available:
+                print(f"[hint] available builders: {', '.join(available)}")
+            return 1
+
+        builder_cls = builder_entry.target
+        if builder_cls is DefaultBuilder:
+            builder = builder_cls(config=invocation.config)
+            manifest = builder.build(
+                str(invocation.source),
+                destination=str(invocation.destination),
+            )
+            if manifest is None:
+                return 1
+            return 0
+
+        builder = builder_cls()
+        run_method = getattr(builder, "run", None)
+        if callable(run_method):
+            # Plugin builders can expose a command-like run() to parse extra options.
+            return int(run_method(argv))
+
         manifest = builder.build(
             str(invocation.source),
             destination=str(invocation.destination),
         )
-        if manifest is None:
+        if builder_entry.origin == "builtin" and manifest is None:
             return 1
         return 0
 

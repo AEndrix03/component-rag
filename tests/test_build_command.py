@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 
 import numpy as np
 
@@ -70,3 +71,30 @@ def test_build_command_creates_packet(tmp_path: Path, monkeypatch) -> None:
     faiss_index = load_faiss_index(packet_dir / "faiss" / "index.faiss")
     scores, ids = faiss_index.search(vectors[:1], 1)
     assert ids[0][0] == 0
+
+
+def test_build_command_can_select_plugin_builder(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "docs"
+    project.mkdir()
+    (project / "intro.md").write_text("sample", encoding="utf-8")
+
+    plugin_src = Path("tests") / "fixtures" / "plugins" / "sample_plugin"
+    plugin_dst = tmp_path / ".cpm" / "plugins" / "sample_plugin"
+    plugin_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(plugin_src, plugin_dst)
+
+    monkeypatch.chdir(tmp_path)
+
+    result = cli_main(
+        [
+            "build",
+            "--source",
+            "docs",
+            "--destination",
+            str(tmp_path / "out"),
+            "--builder",
+            "sample:sample-builder",
+        ],
+        start_dir=tmp_path,
+    )
+    assert result == 0
