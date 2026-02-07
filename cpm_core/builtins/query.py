@@ -8,7 +8,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any, Iterable
 
-from cpm_builtin.embeddings import EmbeddingClient
+from cpm_builtin.embeddings import EmbeddingClient, EmbeddingsConfigService
 from cpm_builtin.packages import PackageManager, parse_package_spec
 from cpm_builtin.packages.layout import version_dir
 from cpm_core.api import CPMAbstractRetriever, cpmcommand, cpmretriever
@@ -229,14 +229,20 @@ class QueryCommand(_WorkspaceAwareCommand):
         if entry is None:
             return 1
 
+        resolved_embed_url, resolved_embed_mode = self._resolve_embedding_transport(
+            workspace_root=workspace_root,
+            embed_url=getattr(argv, "embed_url", None),
+            embed_mode=getattr(argv, "embeddings_mode", None),
+        )
+
         payload = self._invoke_retriever(
             entry=entry,
             packet=str(argv.packet),
             query=str(argv.query),
             k=int(argv.k),
             cpm_dir=workspace_root,
-            embed_url=getattr(argv, "embed_url", None),
-            embed_mode=getattr(argv, "embeddings_mode", None),
+            embed_url=resolved_embed_url,
+            embed_mode=resolved_embed_mode,
         )
 
         if getattr(argv, "format", "text") == "json":
@@ -340,6 +346,29 @@ class QueryCommand(_WorkspaceAwareCommand):
             "query": query,
             "k": k,
         }
+
+    def _resolve_embedding_transport(
+        self,
+        *,
+        workspace_root: Path,
+        embed_url: str | None,
+        embed_mode: str | None,
+    ) -> tuple[str | None, str | None]:
+        resolved_url = str(embed_url).strip() if embed_url is not None else None
+        resolved_mode = str(embed_mode).strip().lower() if embed_mode is not None else None
+        if resolved_url and resolved_mode:
+            return resolved_url, resolved_mode
+
+        service = EmbeddingsConfigService(workspace_root)
+        default_provider = service.default_provider()
+        if default_provider is None:
+            return resolved_url, resolved_mode
+
+        if not resolved_url:
+            resolved_url = default_provider.url
+        if not resolved_mode:
+            resolved_mode = str(default_provider.type).strip().lower() or DEFAULT_EMBED_MODE
+        return resolved_url, resolved_mode
 
     def _print_text(self, payload: dict[str, Any], *, retriever_name: str) -> None:
         if not payload.get("ok", True):

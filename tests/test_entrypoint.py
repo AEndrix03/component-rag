@@ -68,6 +68,50 @@ def test_query_command_dispatches_to_native_retriever(
     assert "Authentication setup guide" in out
 
 
+def test_query_command_uses_default_embedding_provider(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+    add_code = cli_main.main(
+        [
+            "embed",
+            "add",
+            "--name",
+            "local",
+            "--url",
+            "http://localhost:8000/v1/embeddings",
+            "--set-default",
+        ],
+        start_dir=tmp_path,
+    )
+    assert add_code == 0
+
+    captured: dict[str, object] = {}
+
+    def _fake_retrieve(self, identifier: str, **kwargs):
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "packet": kwargs.get("packet"),
+            "query": identifier,
+            "k": kwargs.get("k", 5),
+            "results": [],
+        }
+
+    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
+    code = cli_main.main(
+        ["query", "--packet", "my-docs", "--query", "authentication setup", "-k", "5"],
+        start_dir=tmp_path,
+    )
+
+    assert code == 0
+    assert captured.get("embed_url") == "http://localhost:8000/v1/embeddings"
+    assert captured.get("embed_mode") == "http"
+    assert "[cpm:query] retriever=cpm:native-retriever packet=my-docs k=5" in capsys.readouterr().out
+
+
 def test_query_command_supports_custom_retriever_selection(
     monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
