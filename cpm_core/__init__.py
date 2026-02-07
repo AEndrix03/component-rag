@@ -4,7 +4,7 @@ from .app import CPMApp
 from .config import ConfigStore, default_config_path
 from .events import Event, EventBus
 from .paths import UserDirs
-from .plugin_manager import PluginManager
+from .plugin.manager import PluginManager
 from .registry import RegistryClient
 from .services import ServiceContainer
 from .workspace import Workspace, WorkspaceResolver, WorkspaceLayout

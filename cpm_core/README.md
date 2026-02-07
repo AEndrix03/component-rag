@@ -40,7 +40,7 @@ cpm_core/
 ├── services.py         # ServiceContainer (lightweight DI)
 ├── config.py           # ConfigStore (TOML config management)
 ├── events.py           # EventBus (priority-based pub/sub)
-├── plugin_manager.py   # PluginManager (discovery and loading)
+├── plugin/manager.py   # PluginManager (discovery and loading)
 ├── compat.py           # Legacy command compatibility
 ├── paths.py            # Platform-aware path utilities
 ├── api/                # Abstract interfaces for extensibility
@@ -241,7 +241,7 @@ config.save()
 
 ---
 
-### PluginManager (`plugin_manager.py`)
+### PluginManager (`plugin/manager.py`)
 
 Discovers and loads plugins from workspace and user directories:
 

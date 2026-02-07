@@ -91,35 +91,6 @@ def test_compute_checksums(tmp_path: Path) -> None:
     assert hashes["docs.jsonl"]["value"] == expected
 
 
-def test_load_legacy_manifest(tmp_path: Path) -> None:
-    legacy_data = {
-        "schema_version": "legacy",
-        "packet_id": "legacy-packet",
-        "embedding": {
-            "provider": "sentence-transformers",
-            "model": "legacy",
-            "dim": 8,
-            "dtype": "float16",
-            "normalized": True,
-            "max_seq_length": 1024,
-        },
-        "counts": {"docs": 1, "vectors": 1},
-        "files": {"docs": "docs.jsonl"},
-        "similarity": {"space": "cosine"},
-        "source": {"input_dir": "/legacy"},
-        "cpm": {},
-        "incremental": {},
-        "checksums": {"docs.jsonl": {"algo": "sha256", "value": ""}},
-        "extra_prop": {"flag": True},
-    }
-    path = tmp_path / "manifest.json"
-    path.write_text(json.dumps(legacy_data), encoding="utf-8")
-    manifest = load_manifest(path)
-    assert manifest.packet_id == "legacy-packet"
-    assert manifest.embedding.model == "legacy"
-    assert manifest.extras["extra_prop"]["flag"]
-
-
 def test_faiss_index_roundtrip(tmp_path: Path) -> None:
     pytest.importorskip("faiss")
     vectors = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float32)

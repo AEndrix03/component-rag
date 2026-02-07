@@ -4,7 +4,7 @@ from pathlib import Path
 
 from cpm_core.events import EventBus
 from cpm_core.paths import UserDirs
-from cpm_core.plugin_manager import PluginManager
+from cpm_core.plugin.manager import PluginManager
 from cpm_core.workspace import Workspace
 
 

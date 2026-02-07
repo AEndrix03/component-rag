@@ -28,7 +28,9 @@ def test_bootstrap_without_plugins(tmp_path: Path) -> None:
         "init",
         "list",
         "listing",
+        "native-retriever",
         "pkg",
+        "query",
     )
     assert status.registry_status == "online"
 
@@ -50,7 +52,9 @@ def test_bootstrap_with_sample_plugin(tmp_path: Path) -> None:
         "init",
         "list",
         "listing",
+        "native-retriever",
         "pkg",
+        "query",
         "sample-builder",
         "sample-command",
     )

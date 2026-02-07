@@ -5,7 +5,6 @@ from .client import EmbeddingClient, VALID_EMBEDDING_MODES
 from .connector import HttpEmbeddingConnector
 from .config import EmbeddingProviderConfig, EmbeddingsConfigService
 from .openai import (
-    OpenAIEmbeddingClient,
     OpenAIEmbeddingsHttpClient,
     normalize_embeddings,
     parse_openai_response,
@@ -24,7 +23,6 @@ __all__ = [
     "EmbedRequestIR",
     "EmbedResponseIR",
     "OpenAIEmbeddingsHttpClient",
-    "OpenAIEmbeddingClient",
     "serialize_openai_request",
     "parse_openai_response",
     "normalize_embeddings",

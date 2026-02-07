@@ -8,11 +8,6 @@ from typing import Sequence
 
 from cpm_builtin.embeddings import EmbeddingsConfigService
 from cpm_core.api import CPMAbstractCommand, cpmcommand
-from cpm_core.compat import (
-    LEGACY_COMMAND_ALIASES,
-    LegacyLayoutIssue,
-    detect_legacy_layout,
-)
 from cpm_core.workspace import WorkspaceLayout, WorkspaceResolver
 
 
@@ -89,8 +84,6 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
         )
 
         service = EmbeddingsConfigService(layout.config_dir)
-        legacy_issues = detect_legacy_layout(workspace_root, layout)
-
         from cpm_core.app import CPMApp
 
         app = CPMApp(start_dir=workspace_root)
@@ -106,7 +99,6 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
             plugin_records=plugin_records,
             registry=registry,
             registry_status=registry_status,
-            legacy_issues=legacy_issues,
         )
         return 0
 
@@ -119,14 +111,11 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
         plugin_records: Sequence["cpm_core.plugin.manager.PluginRecord"],
         registry: "cpm_core.registry.client.RegistryClient",
         registry_status: str,
-        legacy_issues: list[LegacyLayoutIssue],
     ) -> None:
         self._print_workspace(workspace_root, layout)
         self._print_embedding(service, layout, workspace_root)
         self._print_plugins(plugin_records)
         self._print_registry(registry, registry_status)
-        self._print_alias_hints()
-        self._print_legacy_layout(legacy_issues)
 
     def _print_workspace(self, workspace_root: Path, layout: WorkspaceLayout) -> None:
         print(f"[cpm:doctor] workspace root: {workspace_root}")
@@ -134,12 +123,6 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
         print(f"[cpm:doctor] layout dirs: packages={layout.packages_dir.name} state={layout.state_dir.name}")
         emb_exists = layout.embeddings_file.exists()
         print(f"[cpm:doctor] embeddings file: {layout.embeddings_file} (exists={emb_exists})")
-        legacy_embed = workspace_root / "embeddings.yml"
-        if legacy_embed.exists() and not emb_exists:
-            print(
-                f"[cpm:doctor] warning: legacy {legacy_embed} detected; "
-                f"move under {layout.embeddings_file} and rerun `cpm doctor`"
-            )
 
     def _print_embedding(
         self,
@@ -160,7 +143,7 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
         if not providers:
             print(
                 "[cpm:doctor] no embedding providers configured; run "
-                "`cpm embed add` (delegates to legacy CLI) to register one."
+                "`cpm embed add` to register one."
             )
 
     def _print_plugins(self, records: Sequence["cpm_core.plugin.manager.PluginRecord"]) -> None:
@@ -181,28 +164,6 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
             f"(last ping={registry.status})"
         )
 
-    def _print_alias_hints(self) -> None:
-        print("[cpm:doctor] legacy command aliases:")
-        for alias in LEGACY_COMMAND_ALIASES:
-            note = f" ({alias.note})" if alias.note else ""
-            print(f"  - {alias.legacy} -> {alias.replacement}{note}")
-
-    def _print_legacy_layout(self, issues: list[LegacyLayoutIssue]) -> None:
-        if not issues:
-            print("[cpm:doctor] workspace layout is current (no legacy packet roots found).")
-            return
-        print("[cpm:doctor] legacy layout detected:")
-        for issue in issues:
-            details = []
-            if issue.packet_name:
-                details.append(f"name={issue.packet_name}")
-            if issue.packet_version:
-                details.append(f"version={issue.packet_version}")
-            details_text = f" ({', '.join(details)})" if details else ""
-            print(
-                f"  - {issue.current_path} -> {issue.suggested_path}{details_text}"
-            )
-        print("[cpm:doctor] consider migrating these artifacts into the .cpm/packages hierarchy.")
 
 
 @cpmcommand(name="help", group="cpm")

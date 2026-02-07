@@ -1,0 +1,434 @@
+"""Built-in query command and native retriever wiring."""
+
+from __future__ import annotations
+
+import json
+import os
+from argparse import ArgumentParser
+from pathlib import Path
+from typing import Any, Iterable
+
+from cpm_builtin.embeddings import EmbeddingClient
+from cpm_builtin.packages import PackageManager, parse_package_spec
+from cpm_builtin.packages.layout import version_dir
+from cpm_core.api import CPMAbstractRetriever, cpmcommand, cpmretriever
+from cpm_core.registry import CPMRegistryEntry, FeatureRegistry
+
+from .commands import _WorkspaceAwareCommand
+
+DEFAULT_RETRIEVER = "native-retriever"
+_CONFIG_RETRIEVER_KEYS = ("retriever", "query_retriever", "default_retriever")
+DEFAULT_EMBED_URL = "http://127.0.0.1:8876"
+DEFAULT_EMBED_MODE = "http"
+
+
+@cpmretriever(name=DEFAULT_RETRIEVER, group="cpm")
+class NativeFaissRetriever(CPMAbstractRetriever):
+    """Native FAISS retriever backed by packets installed in the workspace."""
+
+    def retrieve(self, identifier: str, **kwargs: Any) -> dict[str, Any]:
+        packet = str(kwargs.get("packet") or "").strip()
+        if not packet:
+            raise ValueError("packet is required")
+        query = str(identifier)
+        k = int(kwargs.get("k", 5))
+        cpm_dir = Path(str(kwargs.get("cpm_dir") or ".cpm"))
+        embed_url = str(kwargs.get("embed_url") or os.environ.get("RAG_EMBED_URL") or DEFAULT_EMBED_URL)
+        embed_mode = str(kwargs.get("embed_mode") or os.environ.get("RAG_EMBED_MODE") or DEFAULT_EMBED_MODE)
+        packet_dir = self._resolve_packet_dir(cpm_dir, packet)
+        if packet_dir is None:
+            return {
+                "ok": False,
+                "error": "packet_not_found",
+                "packet": packet,
+                "tried": str((cpm_dir / "packages" / packet).resolve()).replace("\\", "/"),
+            }
+
+        manifest_path = packet_dir / "manifest.json"
+        if not manifest_path.exists():
+            return {
+                "ok": False,
+                "error": "packet_not_found",
+                "detail": f"missing manifest at {manifest_path}",
+                "packet": packet,
+            }
+        docs_path = packet_dir / "docs.jsonl"
+        if not docs_path.exists():
+            return {
+                "ok": False,
+                "error": "packet_not_found",
+                "detail": f"missing docs.jsonl at {docs_path}",
+                "packet": packet,
+            }
+        index_path = packet_dir / "faiss" / "index.faiss"
+        if not index_path.exists():
+            return {
+                "ok": False,
+                "error": "packet_not_found",
+                "detail": f"missing faiss index at {index_path}",
+                "packet": packet,
+            }
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        embedding_cfg = manifest.get("embedding") or {}
+        model_name = str(embedding_cfg.get("model") or "").strip()
+        if not model_name:
+            return {
+                "ok": False,
+                "error": "invalid_manifest",
+                "detail": "manifest.embedding.model is required",
+                "packet": packet,
+            }
+        max_seq_length = int(embedding_cfg.get("max_seq_length", 1024))
+        docs = self._load_docs(docs_path)
+        try:
+            import faiss
+
+            index = faiss.read_index(str(index_path))
+        except Exception as exc:  # pragma: no cover - defensive
+            return {
+                "ok": False,
+                "error": "retrieval_failed",
+                "detail": str(exc),
+                "packet": packet,
+            }
+
+        embedder = EmbeddingClient(embed_url, mode=embed_mode)
+        if not embedder.health():
+            return {
+                "ok": False,
+                "error": "embed_server_unreachable",
+                "embed_url": embed_url,
+                "embed_mode": embed_mode,
+                "hint": "configure an embedding provider with `cpm embed add ... --set-default` or set RAG_EMBED_URL/RAG_EMBED_MODE",
+            }
+
+        try:
+            vector = embedder.embed_texts(
+                [query],
+                model_name=model_name,
+                max_seq_length=max_seq_length,
+                normalize=True,
+                dtype="float32",
+                show_progress=False,
+            )
+            scores, ids = index.search(vector, max(int(k), 1))
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "error": "retrieval_failed",
+                "detail": "required packet artifacts are missing",
+                "packet": packet,
+            }
+        except Exception as exc:  # pragma: no cover - defensive
+            return {
+                "ok": False,
+                "error": "retrieval_failed",
+                "detail": str(exc),
+                "packet": packet,
+            }
+
+        hits: list[dict[str, Any]] = []
+        for idx, score in zip(ids[0], scores[0]):
+            if int(idx) < 0:
+                continue
+            if int(idx) >= len(docs):
+                continue
+            doc = docs[int(idx)]
+            hits.append(
+                {
+                    "score": float(score),
+                    "id": doc.get("id"),
+                    "text": doc.get("text"),
+                    "metadata": doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {},
+                }
+            )
+
+        return {
+            "ok": True,
+            "packet": packet_dir.name,
+            "packet_path": str(packet_dir).replace("\\", "/"),
+            "query": query,
+            "k": int(k),
+            "embedding": {
+                "model": model_name,
+                "max_seq_length": max_seq_length,
+                "embed_url": embed_url,
+                "mode": embed_mode,
+            },
+            "results": hits,
+        }
+
+    @staticmethod
+    def _resolve_packet_dir(cpm_dir: Path, packet: str) -> Path | None:
+        candidate = Path(packet)
+        if candidate.exists() and candidate.is_dir():
+            return candidate.resolve()
+        manager = PackageManager(cpm_dir)
+        name, explicit_version = parse_package_spec(packet)
+        if not name:
+            return None
+        try:
+            resolved = manager.resolve_version(name, explicit_version)
+        except ValueError:
+            return None
+        target = version_dir(cpm_dir, name, resolved)
+        if not target.exists():
+            return None
+        return target.resolve()
+
+    @staticmethod
+    def _load_docs(path: Path) -> list[dict[str, Any]]:
+        docs: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as stream:
+            for line in stream:
+                payload = line.strip()
+                if not payload:
+                    continue
+                try:
+                    record = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict):
+                    docs.append(record)
+        return docs
+
+
+@cpmcommand(name="query", group="cpm")
+class QueryCommand(_WorkspaceAwareCommand):
+    """Query packets for relevant context using native or plugin retrievers."""
+
+    @classmethod
+    def configure(cls, parser: ArgumentParser) -> None:
+        parser.add_argument("--workspace-dir", default=".", help="Workspace root directory")
+        parser.add_argument("--packet", required=True, help="Packet name or path")
+        parser.add_argument("--query", required=True, help="Query text")
+        parser.add_argument("-k", type=int, default=5, help="Number of results to retrieve")
+        parser.add_argument("--retriever", help="Retriever name or group:name")
+        parser.add_argument("--embed-url", help="Embedding server URL override")
+        parser.add_argument(
+            "--embeddings-mode",
+            choices=["http"],
+            help="Embedding transport mode override",
+        )
+        parser.add_argument(
+            "--format",
+            choices=["text", "json"],
+            default="text",
+            help="Output format",
+        )
+
+    def run(self, argv: Any) -> int:
+        requested_dir = getattr(argv, "workspace_dir", None)
+        workspace_root = self._resolve(requested_dir)
+        self.workspace_root = workspace_root
+
+        requested = self._requested_retriever(argv, workspace_root)
+        entries = self._load_retriever_entries(workspace_root)
+        entry = self._resolve_retriever_entry(entries, requested)
+        if entry is None:
+            return 1
+
+        payload = self._invoke_retriever(
+            entry=entry,
+            packet=str(argv.packet),
+            query=str(argv.query),
+            k=int(argv.k),
+            cpm_dir=workspace_root,
+            embed_url=getattr(argv, "embed_url", None),
+            embed_mode=getattr(argv, "embeddings_mode", None),
+        )
+
+        if getattr(argv, "format", "text") == "json":
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0 if payload.get("ok", True) else 1
+
+        self._print_text(payload, retriever_name=entry.qualified_name)
+        return 0 if payload.get("ok", True) else 1
+
+    def _requested_retriever(self, argv: Any, workspace_root: Path) -> str:
+        explicit = getattr(argv, "retriever", None)
+        if explicit:
+            return str(explicit)
+        for key in _CONFIG_RETRIEVER_KEYS:
+            configured = self.resolver.resolve_setting(key, start_dir=workspace_root)
+            if configured:
+                return configured
+        return DEFAULT_RETRIEVER
+
+    def _load_retriever_entries(self, workspace_root: Path) -> list[CPMRegistryEntry]:
+        from cpm_core.app import CPMApp
+
+        app = CPMApp(start_dir=workspace_root)
+        app.bootstrap()
+        return [entry for entry in app.feature_registry.entries() if entry.kind == "retriever"]
+
+    def _resolve_retriever_entry(
+        self, entries: Iterable[CPMRegistryEntry], requested: str
+    ) -> CPMRegistryEntry | None:
+        pool = list(entries)
+        if not pool:
+            print("[cpm:query] no retrievers are registered")
+            return None
+
+        if ":" in requested:
+            for entry in pool:
+                if entry.qualified_name == requested:
+                    return entry
+            print(f"[cpm:query] retriever '{requested}' is not registered")
+            return None
+
+        matches = [entry for entry in pool if entry.name == requested]
+        if not matches:
+            print(f"[cpm:query] retriever '{requested}' is not registered")
+            available = ", ".join(sorted(entry.qualified_name for entry in pool))
+            print(f"[cpm:query] available retrievers: {available}")
+            return None
+        if len(matches) > 1:
+            names = ", ".join(sorted(entry.qualified_name for entry in matches))
+            print(
+                f"[cpm:query] retriever '{requested}' is ambiguous ({names}); use group:name"
+            )
+            return None
+        return matches[0]
+
+    def _invoke_retriever(
+        self,
+        *,
+        entry: CPMRegistryEntry,
+        packet: str,
+        query: str,
+        k: int,
+        cpm_dir: Path,
+        embed_url: str | None,
+        embed_mode: str | None,
+    ) -> dict[str, Any]:
+        retriever = entry.target()
+        call_attempts = (
+            lambda: retriever.retrieve(
+                query,
+                k=k,
+                packet=packet,
+                cpm_dir=str(cpm_dir),
+                embed_url=embed_url,
+                embed_mode=embed_mode,
+            ),
+            lambda: retriever.retrieve(query, k=k, packet=packet),
+            lambda: retriever.retrieve(query, k=k),
+            lambda: retriever.retrieve(query),
+        )
+        for attempt in call_attempts:
+            try:
+                raw = attempt()
+                return _normalize_payload(raw, packet=packet, query=query, k=k)
+            except TypeError:
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                return {
+                    "ok": False,
+                    "error": "retrieval_failed",
+                    "detail": str(exc),
+                    "packet": packet,
+                    "query": query,
+                    "k": k,
+                }
+        return {
+            "ok": False,
+            "error": "retriever_signature_mismatch",
+            "detail": f"{entry.qualified_name} does not expose a compatible retrieve() signature",
+            "packet": packet,
+            "query": query,
+            "k": k,
+        }
+
+    def _print_text(self, payload: dict[str, Any], *, retriever_name: str) -> None:
+        if not payload.get("ok", True):
+            error = payload.get("error", "unknown_error")
+            detail = payload.get("detail")
+            print(f"[cpm:query] error={error}")
+            if detail:
+                print(f"[cpm:query] detail={detail}")
+            hint = payload.get("hint")
+            if hint:
+                print(f"[cpm:query] hint={hint}")
+            return
+
+        print(
+            f"[cpm:query] retriever={retriever_name} packet={payload.get('packet')} k={payload.get('k')}"
+        )
+        for index, item in enumerate(payload.get("results", []), start=1):
+            score = item.get("score")
+            score_text = f"{float(score):.4f}" if isinstance(score, (int, float)) else "-"
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            path = metadata.get("path", "-")
+            text = str(item.get("text", "")).replace("\n", " ").strip()
+            if len(text) > 160:
+                text = f"{text[:157]}..."
+            print(f"[{index}] score={score_text} id={item.get('id', '-')} path={path} text={text}")
+
+
+def _normalize_payload(raw: Any, *, packet: str, query: str, k: int) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        payload = dict(raw)
+        payload.setdefault("ok", True)
+        payload.setdefault("packet", packet)
+        payload.setdefault("query", query)
+        payload.setdefault("k", k)
+        results = payload.get("results")
+        if isinstance(results, list):
+            payload["results"] = [_normalize_hit(item) for item in results]
+        else:
+            payload["results"] = []
+        return payload
+
+    if isinstance(raw, list):
+        return {
+            "ok": True,
+            "packet": packet,
+            "query": query,
+            "k": k,
+            "results": [_normalize_hit(item) for item in raw],
+        }
+
+    return {
+        "ok": True,
+        "packet": packet,
+        "query": query,
+        "k": k,
+        "results": [
+            {
+                "score": None,
+                "id": None,
+                "text": str(raw),
+                "metadata": {},
+            }
+        ],
+    }
+
+
+def _normalize_hit(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return {
+            "score": item.get("score"),
+            "id": item.get("id"),
+            "text": item.get("text", ""),
+            "metadata": item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+        }
+    return {"score": None, "id": None, "text": str(item), "metadata": {}}
+
+
+def register_builtin_retrievers(registry: FeatureRegistry) -> None:
+    """Register the native retriever(s) with the supplied registry."""
+
+    metadata = getattr(NativeFaissRetriever, "__cpm_feature__", None)
+    if metadata is None:
+        return
+    registry.register(
+        CPMRegistryEntry(
+            group=metadata["group"],
+            name=str(metadata["name"]),
+            target=NativeFaissRetriever,
+            kind=str(metadata["kind"]),
+            origin="builtin",
+        )
+    )

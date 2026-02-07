@@ -10,10 +10,11 @@ from typing import Any, Callable, Sequence
 from cpm_core.builtins import (
     register_builtin_builders,
     register_builtin_commands,
+    register_builtin_retrievers,
 )
 from cpm_core.config import ConfigStore
 from cpm_core.events import EventBus
-from cpm_core.plugin_manager import PluginManager
+from cpm_core.plugin.manager import PluginManager
 from cpm_core.registry import FeatureRegistry, RegistryClient
 from cpm_core.services import ServiceContainer
 from cpm_core.workspace import Workspace, WorkspaceLayout, WorkspaceResolver
@@ -93,6 +94,7 @@ class CPMApp:
             return
         register_builtin_commands(self.feature_registry)
         register_builtin_builders(self.feature_registry)
+        register_builtin_retrievers(self.feature_registry)
         self._builtins_registered = True
 
     def bootstrap(self) -> CPMAppStatus:

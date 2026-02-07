@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from cpm_core.app import CPMApp
-from cpm_core.compat import LEGACY_COMMAND_TOKENS
 from cpm_core.registry import AmbiguousFeatureError, FeatureNotFoundError
 from cpm_core.registry.entry import CPMRegistryEntry
 
@@ -37,9 +36,6 @@ def main(
 
     if tokens and tokens[0] == "embed":
         return _run_embed_cli(tokens)
-
-    if _should_delegate_to_legacy(tokens):
-        return _run_legacy_cli(tokens)
 
     app = CPMApp(start_dir=start_dir)
     app.bootstrap()
@@ -220,10 +216,6 @@ def _extract_command_spec(args: Sequence[str], qualified_names: set[str]) -> tup
     return first, list(rest)
 
 
-def _should_delegate_to_legacy(tokens: Sequence[str]) -> bool:
-    return bool(tokens and tokens[0] in LEGACY_COMMAND_TOKENS)
-
-
 def _run_embed_cli(tokens: Sequence[str]) -> int:
     try:
         from cpm_cli.cli import build_parser as _embed_parser
@@ -243,41 +235,6 @@ def _run_embed_cli(tokens: Sequence[str]) -> int:
         return 0
     func(args)
     return 0
-
-
-def _run_legacy_cli(tokens: Sequence[str]) -> int:
-    command = tokens[0] if tokens else ""
-    tail = list(tokens[1:])
-
-    if command == "mcp":
-        # Historical alias: `cpm mcp serve ...` -> `cpm serve ...`
-        if tail and tail[0] == "serve":
-            tail = tail[1:]
-        return main(["serve", *tail])
-
-    alias_map: dict[str, list[str]] = {
-        "lookup": ["pkg", "list"],
-        "use": ["pkg", "use"],
-        "prune": ["pkg", "prune"],
-        "pkg:list": ["pkg", "list"],
-        "pkg:use": ["pkg", "use"],
-        "pkg:prune": ["pkg", "prune"],
-        "pkg:remove": ["pkg", "remove"],
-        "embed:add": ["embed", "add"],
-        "embed:list": ["embed", "list"],
-        "embed:remove": ["embed", "remove"],
-        "embed:set-default": ["embed", "set-default"],
-        "embed:test": ["embed", "test"],
-        "embed:status": ["embed", "list"],
-    }
-
-    mapped_prefix = alias_map.get(command)
-    if mapped_prefix is not None:
-        return main([*mapped_prefix, *tail])
-
-    print(f"[cpm] unsupported compatibility alias: '{command}'")
-    print("[cpm] use 'cpm help --long' to list supported commands.")
-    return 1
 
 
 def to_int(result: int | None) -> int:

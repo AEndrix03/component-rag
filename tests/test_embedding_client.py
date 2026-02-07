@@ -102,25 +102,11 @@ def test_embedding_client_http_mode_uses_openai_endpoint() -> None:
         _stop_server(server)
 
 
-def test_embedding_client_legacy_mode_uses_embed_endpoint() -> None:
-    server, base_url = _start_server()
-    try:
-        client = EmbeddingClient(base_url=base_url, mode="legacy", timeout_s=1.0)
-        assert client.health() is True
-        vectors = client.embed_texts(
-            ["a", "b", "c"],
-            model_name="legacy-model",
-            max_seq_length=256,
-            normalize=True,
-            dtype="float16",
-            show_progress=False,
-        )
-        assert vectors.shape == (3, 2)
-        assert vectors.dtype == np.float16
-    finally:
-        _stop_server(server)
+def test_embedding_client_rejects_legacy_mode() -> None:
+    with pytest.raises(ValueError, match="must be 'http'"):
+        EmbeddingClient(base_url="http://127.0.0.1:8876", mode="legacy")
 
 
 def test_embedding_client_rejects_invalid_mode() -> None:
-    with pytest.raises(ValueError, match="embeddings.mode"):
+    with pytest.raises(ValueError, match="must be 'http'"):
         EmbeddingClient(base_url="http://127.0.0.1:8876", mode="invalid")

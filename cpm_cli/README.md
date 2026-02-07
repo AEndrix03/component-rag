@@ -3,7 +3,7 @@
 **Command-line interface routing and resolution for CPM.**
 
 `cpm_cli` provides the CLI entry point that resolves command tokens against the Feature Registry and dispatches to the
-appropriate handlers, including legacy command support.
+appropriate handlers.
 
 ---
 
@@ -18,9 +18,8 @@ cpm plugin:list
 # Embed commands (delegated to cpm_cli/cli.py)
 cpm embed add --name local --url http://127.0.0.1:8876
 
-# Legacy commands (backward compatibility)
-cpm lookup     # → pkg:list
-cpm lookup     # → cpm pkg list
+# Direct command
+cpm pkg list
 ```
 
 ---
@@ -34,7 +33,7 @@ User Input: "cpm plugin:list --verbose"
        │
        ├─ Check special cases:
        │   ├─ "embed" → delegate to cpm_cli/cli.py
-       │   └─ compatibility aliases → map to modular commands
+       │   └─ direct dispatch to modular commands
        │
        ├─ Bootstrap CPMApp
        │   ├─ Load workspace
@@ -161,31 +160,9 @@ cpm embed add --name local --url http://127.0.0.1:8876
 - `cpm embed test` - Validate provider connectivity
 - `cpm embed status` - Check server status
 
-### Legacy Commands
+### Command Dispatch
 
-Legacy tokens are mapped for backward compatibility:
-
-| Legacy Token | Modern Equivalent                |
-|--------------|----------------------------------|
-| `lookup`     | `pkg:list`                       |
-| `use`        | `pkg:use`                        |
-| `prune`      | `pkg:prune`                      |
-| `mcp`        | `serve` (if followed by "serve") |
-
-**Example:**
-
-```bash
-cpm lookup           # Mapped to: cpm pkg:list
-cpm use pkg@1.0.0    # Mapped to: cpm pkg:use pkg@1.0.0
-```
-
-**Legacy delegation:**
-
-Compatibility aliases currently cover:
-- `lookup` -> `pkg list`
-- `use` -> `pkg use`
-- `prune` -> `pkg prune`
-- `mcp serve` -> `serve`
+The CLI dispatches directly to registered commands.
 
 ---
 

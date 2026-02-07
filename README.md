@@ -95,9 +95,9 @@ Claude can now search your docs, code, and knowledge bases conversationally!
 Versioned packets with semantic versioning, pinning, and pruning:
 
 ```bash
-cpm pkg:list                      # List installed packets
-cpm pkg:use my-packet@1.2.0       # Pin specific version
-cpm pkg:prune my-packet --keep 2  # Keep 2 latest versions
+cpm pkg list                      # List installed packets
+cpm pkg use my-packet@1.2.0       # Pin specific version
+cpm pkg prune my-packet --keep 2  # Keep 2 latest versions
 ```
 
 ---
@@ -497,9 +497,9 @@ Here are the most relevant sections from python-stdlib:
 | `cpm init`                  | Initialize CPM workspace               |
 | `cpm doctor`                | Validate workspace and diagnose issues |
 | `cpm build`                 | Build a context packet from source     |
-| `cpm pkg:list`              | List installed packets                 |
-| `cpm pkg:use <pkg@version>` | Pin a packet version                   |
-| `cpm pkg:prune <pkg>`       | Remove old packet versions             |
+| `cpm pkg list`              | List installed packets                 |
+| `cpm pkg use <pkg@version>` | Pin a packet version                   |
+| `cpm pkg prune <pkg>`       | Remove old packet versions             |
 | `cpm plugin:list`           | List loaded plugins                    |
 | `cpm plugin:doctor`         | Diagnose plugin issues                 |
 | `cpm mcp:serve`             | Start MCP server for Claude            |

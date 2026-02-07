@@ -243,6 +243,3 @@ class OpenAIEmbeddingsHttpClient:
 
         raise RuntimeError("failed to obtain embeddings after retries") from last_error
 
-
-# Backward compatibility alias
-OpenAIEmbeddingClient = OpenAIEmbeddingsHttpClient

@@ -15,12 +15,18 @@ from .commands import (
     PluginListCommand,
 )
 from .pkg import PkgCommand
+from .query import QueryCommand, register_builtin_retrievers
 
-__all__ = ["register_builtin_commands", "register_builtin_builders"]
+__all__ = [
+    "register_builtin_commands",
+    "register_builtin_builders",
+    "register_builtin_retrievers",
+]
 
 _BUILTIN_FEATURES: Sequence[type] = (
     InitCommand,
     BuildCommand,
+    QueryCommand,
     PluginListCommand,
     PluginDoctorCommand,
     PkgCommand,

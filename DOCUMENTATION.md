@@ -196,7 +196,7 @@
 
 - **Core**: init, help, listing, doctor
 - **Plugin**: plugin:list, plugin:doctor
-- **Package**: pkg:list, pkg:use, pkg:prune
+- **Package**: pkg list, pkg use, pkg prune
 - **Build**: build
 - **Query**: query (legacy)
 - **Embed**: embed add/list/remove/set-default/test

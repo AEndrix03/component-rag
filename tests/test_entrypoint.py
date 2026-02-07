@@ -1,7 +1,9 @@
 import importlib
+from pathlib import Path
 
 from cpm_cli import __main__ as cli_entry
 import pytest
+from cpm_core.registry import CPMRegistryEntry
 
 
 def test_console_module_entrypoint_delegates_to_cli_main(monkeypatch):
@@ -12,21 +14,110 @@ def test_console_module_entrypoint_delegates_to_cli_main(monkeypatch):
     assert cli_entry.main() == 7
 
 
-def test_dispatch_supports_pkg_colon_alias(
+def test_dispatch_rejects_removed_lookup_alias(
     tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
-    code = cli_main.main(["pkg:list"], start_dir=tmp_path)
+    code = cli_main.main(["lookup"], start_dir=tmp_path)
 
-    assert code == 0
-    assert "[cpm:pkg] no packages installed" in capsys.readouterr().out
+    assert code == 1
+    assert "lookup" in capsys.readouterr().out
 
 
-def test_dispatch_supports_embed_status_alias(
+def test_dispatch_rejects_removed_legacy_alias(
     tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
     code = cli_main.main(["embed:status"], start_dir=tmp_path)
 
+    assert code == 1
+    assert "embed:status" in capsys.readouterr().out
+
+
+def test_query_command_dispatches_to_native_retriever(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+
+    def _fake_retrieve(self, identifier: str, **kwargs):
+        return {
+            "ok": True,
+            "packet": kwargs.get("packet"),
+            "query": identifier,
+            "k": kwargs.get("k", 5),
+            "results": [
+                {
+                    "score": 0.91,
+                    "id": "doc-1",
+                    "text": "Authentication setup guide",
+                    "metadata": {"path": "docs/auth.md"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
+    code = cli_main.main(
+        ["query", "--packet", "my-docs", "--query", "authentication setup", "-k", "5"],
+        start_dir=tmp_path,
+    )
+
+    out = capsys.readouterr().out
     assert code == 0
-    assert "[cpm:embed] no embedding providers configured" in capsys.readouterr().out
+    assert "[cpm:query] retriever=cpm:native-retriever packet=my-docs k=5" in out
+    assert "Authentication setup guide" in out
+
+
+def test_query_command_supports_custom_retriever_selection(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+
+    class _CustomRetriever:
+        def retrieve(self, identifier: str, **kwargs):
+            return {
+                "ok": True,
+                "packet": kwargs.get("packet"),
+                "query": identifier,
+                "k": kwargs.get("k", 5),
+                "results": [{"score": 0.5, "id": "x", "text": "custom", "metadata": {}}],
+            }
+
+    custom_entry = CPMRegistryEntry(
+        group="sample",
+        name="custom-retriever",
+        target=_CustomRetriever,
+        kind="retriever",
+        origin="test",
+    )
+    native_entry = CPMRegistryEntry(
+        group="cpm",
+        name="native-retriever",
+        target=query_builtin.NativeFaissRetriever,
+        kind="retriever",
+        origin="builtin",
+    )
+
+    monkeypatch.setattr(
+        query_builtin.QueryCommand,
+        "_load_retriever_entries",
+        lambda self, workspace_root: [native_entry, custom_entry],
+    )
+
+    code = cli_main.main(
+        [
+            "query",
+            "--packet",
+            "my-docs",
+            "--query",
+            "auth",
+            "--retriever",
+            "custom-retriever",
+        ],
+        start_dir=tmp_path,
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "[cpm:query] retriever=sample:custom-retriever packet=my-docs k=5" in out

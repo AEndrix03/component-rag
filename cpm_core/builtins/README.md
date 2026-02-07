@@ -167,11 +167,7 @@ Configuration: ✓ Valid
 Registry: ✓ Connected
   URL: http://localhost:8786
 
-Legacy Commands: Available
-  lookup   → pkg:list
-  use      → pkg:use
-  prune    → pkg:prune
-  mcp serve → serve
+Legacy Commands: Removed
 ```
 
 **Implementation:** `commands.py`
@@ -198,16 +194,16 @@ Package management command implementations.
 
 **Commands:**
 
-- `pkg:list` - List installed packages
-- `pkg:use` - Pin package version
-- `pkg:prune` - Remove old versions
+- `pkg list` - List installed packages
+- `pkg use` - Pin package version
+- `pkg prune` - Remove old versions
 
 **Usage:**
 
 ```bash
-cpm pkg:list
-cpm pkg:use my-package@1.2.0
-cpm pkg:prune my-package --keep 2
+cpm pkg list
+cpm pkg use my-package@1.2.0
+cpm pkg prune my-package --keep 2
 ```
 
 ---

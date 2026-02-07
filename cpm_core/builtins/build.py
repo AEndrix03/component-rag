@@ -203,7 +203,7 @@ class BuildCommand(_WorkspaceAwareCommand):
         parser.add_argument(
             "--embeddings-mode",
             choices=VALID_EMBEDDING_MODES,
-            help="Embedding transport mode (http|legacy). Default: http",
+            help="Embedding transport mode (http). Default: http",
         )
         parser.add_argument("--timeout", type=float, help="Embedding request timeout (seconds)")
 

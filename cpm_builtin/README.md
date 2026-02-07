@@ -232,9 +232,9 @@ cpm query --packet my-docs --query "authentication setup" -k 5
 ### Package Commands
 
 ```bash
-cpm pkg:list                    # List installed packages
-cpm pkg:use my-package@1.2.0    # Pin version
-cpm pkg:prune my-package --keep 2  # Remove old versions
+cpm pkg list                    # List installed packages
+cpm pkg use my-package@1.2.0    # Pin version
+cpm pkg prune my-package --keep 2  # Remove old versions
 ```
 
 **Implementation:** `pkg.py`

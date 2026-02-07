@@ -2,7 +2,7 @@
 
 ## Project Structure and Module Organization
 - `cpm_core/`: Core app lifecycle, workspace, registry, plugin runtime, built-in command registration.
-- `cpm_cli/`: CLI routing/dispatch layer and compatibility aliases.
+- `cpm_cli/`: CLI routing/dispatch layer.
 - `cpm_builtin/`: Built-in features (chunking, embeddings config, package manager helpers).
 - `cpm_plugins/`: Official plugins, including MCP integration.
 - `registry/`: Externalized registry package (maintained separately from core runtime evolution).
