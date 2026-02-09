@@ -9,6 +9,17 @@ from .errors import (
     OciSecurityError,
 )
 from .types import OciArtifactSpec, OciClientConfig, OciPullResult, OciPushResult
+from .packaging import (
+    CPM_LAYER_MEDIATYPE,
+    CPM_LOCK_MEDIATYPE,
+    CPM_MANIFEST_MEDIATYPE,
+    CPM_OCI_LOCK,
+    CPM_OCI_MANIFEST,
+    OciPacketLayout,
+    build_oci_layout,
+    digest_ref_for,
+    package_ref_for,
+)
 
 __all__ = [
     "OciClient",
@@ -22,4 +33,13 @@ __all__ = [
     "OciAuthError",
     "OciNotSupportedError",
     "build_artifact_spec",
+    "CPM_OCI_MANIFEST",
+    "CPM_OCI_LOCK",
+    "CPM_LAYER_MEDIATYPE",
+    "CPM_MANIFEST_MEDIATYPE",
+    "CPM_LOCK_MEDIATYPE",
+    "OciPacketLayout",
+    "build_oci_layout",
+    "package_ref_for",
+    "digest_ref_for",
 ]
