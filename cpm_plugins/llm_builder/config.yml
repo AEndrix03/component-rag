@@ -1,0 +1,13 @@
+llm:
+  endpoint: "http://localhost:11434/v1/chat/completions"
+  model: "qwen2.5:1.5b-instruct"
+  prompt_version: "chunk_enrich_v1"
+  api_style: "auto"
+  max_retries: 1
+
+request_timeout: 120.0
+
+constraints:
+  max_chunk_tokens: 800
+  min_chunk_tokens: 120
+  max_segments_per_request: 8

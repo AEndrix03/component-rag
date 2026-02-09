@@ -1,32 +1,31 @@
 # Repository Guidelines
 
 ## Project Structure and Module Organization
-- `cpm/`: Core Context Packet Manager package, CLI, and chunkers. Source in `cpm/src/`.
-- `embedding_pool/`: Embedding Pool server and runtime. Source in `embedding_pool/src/`.
-- `registry/`: CPM Registry service and storage. Source in `registry/src/`.
-- `.cpm/`: Local runtime configuration and cache created by `cpm init`.
+- `cpm_core/`: Core app lifecycle, workspace, registry, plugin runtime, built-in command registration.
+- `cpm_cli/`: CLI routing/dispatch layer.
+- `cpm_builtin/`: Built-in features (chunking, embeddings config, package manager helpers).
+- `cpm_plugins/`: Official plugins, including MCP integration.
+- `registry/`: Externalized registry package (maintained separately from core runtime evolution).
+- `.cpm/`: Local runtime configuration/state created by `cpm init`.
 - `.venv/`: Local virtual environment (not tracked).
 
 ## Build, Test, and Development Commands
-- `python -m venv .venv` and `pip install -e ./cpm` (or `./embedding_pool`, `./registry`): set up editable installs.
-- `cpm init`: create `.cpm/config.yml` and `.cpm/pool.yml`.
-- `cpm embed start-server --detach`: run the embedding server locally.
-- `cpm build --input-dir ./docs --packet-dir ./packets/example --model jina-en --version 1.0.0`: build a packet.
+- `python -m venv .venv` and `pip install -e .` (or `pip install -e ".[dev]"`): set up editable install.
+- `cpm init`: create workspace config under `.cpm/config/`.
+- `cpm embed add --name local --url http://127.0.0.1:8876 --set-default`: register the local embedding endpoint.
+- `cpm build --source ./docs --name example --packet-version 1.0.0`: build a packet with the modular build command.
 - `cpm query --packet example --query "..." -k 5`: query a packet.
-- `cpm-registry start --detach`: run the registry service.
-- `pytest`: run tests inside a component directory (when tests exist).
+- `pytest`: run tests.
 
 ## Coding Style and Naming Conventions
-- Python 3.10-3.12, type hints encouraged.
-- Ruff is configured in each `pyproject.toml` (line length 120 in `cpm/` and `registry/`, 110 in `embedding_pool/`).
-- Black is configured in `cpm/` and `registry/`.
+- Python 3.11+, type hints encouraged.
+- Ruff/Black are configured in root `pyproject.toml` (line length 120).
 - Module and function names use `snake_case`; classes use `PascalCase`.
 
 ## Testing Guidelines
-- Pytest configuration lives in each component `pyproject.toml`.
+- Pytest configuration lives in root `pyproject.toml`.
 - Test file patterns: `test_*.py` or `*_test.py`.
-- Add tests under `cpm/tests/`, `embedding_pool/tests/`, or `registry/tests/` as appropriate.
-- Coverage reporting is enabled for `cpm/` and `registry/` (see `--cov` settings).
+- Add tests under `tests/` (or component-local suites when introduced).
 
 ## Commit and Pull Request Guidelines
 - Commit history mixes conventional prefixes (`feat:`) and short informal messages (`wip`, `amend`). Use concise, present-tense summaries; prefer `type: summary` for new work.
@@ -34,5 +33,5 @@
 - If you touch config or storage, call it out explicitly (for example, `.cpm/*`, `registry/.env`, or `registry/registry.db*`).
 
 ## Configuration and Data Notes
-- Local config: `.cpm/config.yml` and `.cpm/pool.yml`.
-- Registry runtime uses SQLite files in `registry/`; avoid committing new or modified DB artifacts unless explicitly required.
+- Local config is under `.cpm/config/` (`config.yml`, `embeddings.yml`).
+- Registry runtime may use SQLite files in `registry/`; avoid committing DB artifacts unless explicitly required.
