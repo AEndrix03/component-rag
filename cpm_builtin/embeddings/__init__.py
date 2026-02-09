@@ -1,0 +1,35 @@
+"""Embedding helpers used by CPM builtins."""
+
+from .cache import EmbeddingCache
+from .client import EmbeddingClient, VALID_EMBEDDING_MODES
+from .connector import HttpEmbeddingConnector
+from .config import EmbeddingProviderConfig, EmbeddingsConfigService
+from .discovery import DiscoveryResult, load_cache, refresh_provider_discovery, save_cache
+from .openai import (
+    OpenAIEmbeddingsHttpClient,
+    normalize_embeddings,
+    parse_openai_response,
+    serialize_openai_request,
+)
+from .postprocess import l2_normalize
+from .types import EmbedRequestIR, EmbedResponseIR
+
+__all__ = [
+    "EmbeddingCache",
+    "EmbeddingClient",
+    "VALID_EMBEDDING_MODES",
+    "HttpEmbeddingConnector",
+    "EmbeddingProviderConfig",
+    "EmbeddingsConfigService",
+    "DiscoveryResult",
+    "load_cache",
+    "save_cache",
+    "refresh_provider_discovery",
+    "EmbedRequestIR",
+    "EmbedResponseIR",
+    "OpenAIEmbeddingsHttpClient",
+    "serialize_openai_request",
+    "parse_openai_response",
+    "normalize_embeddings",
+    "l2_normalize",
+]

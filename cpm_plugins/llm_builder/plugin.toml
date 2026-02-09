@@ -1,0 +1,7 @@
+[plugin]
+id = "llm_builder"
+name = "CPM LLM Builder Plugin"
+version = "0.1.0"
+group = "llm"
+entrypoint = "cpm_llm_builder_plugin.entrypoint:LLMBuilderEntrypoint"
+requires_cpm = ">=0.1.0"

@@ -1,670 +1,721 @@
-# Context Packet Manager (CPM)
+<div align="center">
 
-**A comprehensive ecosystem for building, managing, and serving modular context packets for Retrieval Augmented
-Generation (RAG) applications.**
+# 🎯 Context Packet Manager
 
-CPM is a Python-based framework that transforms your documentation, codebases, and text corpora into efficient,
-queryable knowledge bases. It provides end-to-end tooling for chunking, embedding, indexing, and retrieving contextual
-information through a modular architecture.
+**Transform your documentation and codebases into intelligent, queryable knowledge bases for RAG applications**
 
----
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](http://mypy-lang.org/)
 
-## Architecture Overview
+[Features](#-key-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Plugins](#-plugin-system) • [Docs](#-documentation)
 
-The CPM ecosystem consists of three integrated components:
-
-### 1. CPM Core (Context Packet Manager)
-
-The main CLI and service for creating, managing, and querying context packets. Each packet is a self-contained knowledge
-module containing chunked documents, vector embeddings, and FAISS indices optimized for fast semantic search.
-
-### 2. Embedding Pool Server
-
-A high-performance FastAPI service that manages and serves multiple embedding models. Provides a unified interface for
-generating text embeddings using local Sentence Transformers or remote HTTP services, with dynamic model registration
-and scalability features.
-
-### 3. CPM Registry
-
-A lightweight, self-hosted package registry for publishing, versioning, and distributing context packets across teams
-and projects. Leverages S3-compatible storage for efficient artifact management.
+</div>
 
 ---
 
-## Key Features
+## 🚀 What is CPM?
 
-### Context Packet Management
+CPM (Context Packet Manager) is a **modular Python framework** that transforms documentation, codebases, and
+knowledge repositories into **chunked, embedded, FAISS-indexed** context packets optimized for Retrieval Augmented
+Generation.
 
-- **Modular Knowledge Bases**: Encapsulate domain-specific knowledge into versioned, reusable packets
-- **Advanced Chunking Strategies**: Language-aware chunkers for Python, Java, Markdown, and generic text with AST-based
-  parsing
-- **FAISS Integration**: Efficient vector similarity search with optimized indexing
-- **Version Control**: Full semantic versioning support with update, rollback, and pruning capabilities
-- **MCP Protocol Support**: Expose packet querying as interoperable tools for AI applications
+### Why CPM?
 
-### Embedding Infrastructure
-
-- **Multi-Model Support**: Run multiple embedding models simultaneously with automatic load balancing
-- **Flexible Backends**: Support for local Sentence Transformers and remote embedding services
-- **Dynamic Management**: Register, enable, disable models without server restarts
-- **Model Aliasing**: User-friendly names for quick model access
-- **Queue Management**: Robust request queuing with configurable concurrency limits
-
-### Distribution & Collaboration
-
-- **Self-Hosted Registry**: Complete control over your knowledge base distribution
-- **S3-Compatible Storage**: Works with AWS S3, MinIO, or any S3-compatible backend
-- **Semantic Versioning**: Proper version management with yanked version support
-- **Team Sharing**: Publish and install packets across development teams
+- 🔌 **Plugin Architecture** - Extend without modifying core code
+- 🧩 **Language-Aware Chunking** - 40+ languages with AST/Tree-sitter parsing
+- ⚡ **Incremental Builds** - Hash-based caching for blazing fast rebuilds
+- 🤖 **Claude Desktop Integration** - Native MCP support for AI assistants
+- 📦 **Package Management** - Versioned packets with semantic versioning
+- 🎯 **Zero Config** - Intelligent defaults, works out of the box
 
 ---
 
-## Installation
+## ✨ Key Features
 
-All three components follow the same installation pattern. It's recommended to use a Python virtual environment:
+### 🔌 Extensible Plugin System
 
-```bash
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install CPM Core
-pip install -e .
-
-# Install Embedding Pool (in separate repository)
-pip install -e ./embedding-pool
-
-# Install CPM Registry (in separate repository)
-pip install -e ./cpm-registry
-```
-
----
-
-## Quick Start
-
-### 1. Initialize CPM Configuration
+Create custom commands, builders, and retrievers without touching core code. Plugins auto-discover from `.cpm/plugins/`
+and integrate seamlessly with the CLI.
 
 ```bash
-cpm init
+cpm plugin:list              # List loaded plugins
+cpm my-plugin:custom-command # Your command, integrated
 ```
 
-This creates a `.cpm` directory with `config.yml` and `pool.yml` configuration files.
+### 🧩 Intelligent Chunking for 40+ Languages
 
-### 2. Start the Embedding Server
+CPM automatically detects and applies the optimal chunking strategy for your content. Can't find the right chunker?
+Use `--builder custom-builder` to plug in your own.
+
+| Language                  | Strategy             | Approach                  |
+|---------------------------|----------------------|---------------------------|
+| **Python**                | AST-based            | Function/class boundaries |
+| **Java**                  | Structure-aware      | Method scope preservation |
+| **JavaScript/TypeScript** | Tree-sitter          | Syntax-aware parsing      |
+| **Markdown**              | Header-based         | Hierarchy preservation    |
+| **40+ more**              | Tree-sitter/Fallback | Universal coverage        |
+
+**Fully extensible**: Implement your own builder for custom logic.
+
+### ⚡ Incremental Building
+
+Rebuild only what changed. SHA-256 hash-based caching reuses existing embeddings:
 
 ```bash
-# Register an embedding model
-cpm embed register --model jinaai/jina-embeddings-v2-base-en \
-  --type local_st --max-seq-length 512 --normalize --alias jina-en
+# First build: 250 chunks
+[embed] missing_vectors shape=(250, 768)
 
-# Start server in background
-cpm embed start-server --detach
+# Edit one file, rebuild
+[cache] new_chunks=251 reused=250 to_embed=1 removed=0
+[embed] missing_vectors shape=(1, 768)
 ```
 
-### 3. Build Your First Context Packet
+### 🤖 Claude Desktop Integration
 
-```bash
-# Build from a source directory
-cpm build --input-dir ./my-docs \
-  --packet-dir ./packets/my-knowledge-base \
-  --model jina-en \
-  --version 1.0.0 \
-  --archive
-```
-
-### 4. Query the Packet
-
-```bash
-# Search for relevant context
-cpm query --packet my-knowledge-base \
-  --query "How do I configure authentication?" \
-  -k 5
-```
-
-### 5. Publish to Registry (Optional)
-
-```bash
-# Start registry server
-cpm-registry start --detach
-
-# Publish packet
-cpm publish --from ./packets/my-knowledge-base \
-  --registry http://localhost:8786
-
-# Install on another machine
-cpm install my-knowledge-base@1.0.0 \
-  --registry http://localhost:8786
-```
-
----
-
-## Configuration
-
-### CPM Core Configuration
-
-**`config.yml`** - Main configuration file:
-
-```yaml
-version: 1
-client:
-  base_url: "http://127.0.0.1:8876"
-server:
-  host: "127.0.0.1"
-  port: 8876
-paths:
-  root: ".cpm"
-  pool_yml: ".cpm/pool.yml"
-  state_dir: ".cpm/state"
-  logs_dir: ".cpm/logs"
-  cache_dir: ".cpm/cache"
-process:
-  pid_file: ".cpm/state/embed-server.pid"
-logging:
-  level: "info"
-defaults:
-  request_timeout_s: 120
-  max_queue_per_model: 1000
-  max_inflight_global: 256
-hot_reload:
-  enabled: true
-```
-
-**`pool.yml`** - Embedding model definitions:
-
-```yaml
-version: 1
-models:
-  - name: "jinaai/jina-embeddings-v2-base-en"
-    type: "local_st"
-    normalize: true
-    max_seq_length: 512
-    dtype: "float32"
-    alias: "jina-en"
-  - name: "custom-remote-model"
-    type: "http"
-    base_url: "http://my-embedder.com/embed"
-    remote_model: "model-v1"
-    timeout_s: 60
-    alias: "custom-model"
-```
-
-### Registry Configuration
-
-**`.env`** file for CPM Registry:
-
-```bash
-# Registry server
-REGISTRY_HOST=127.0.0.1
-REGISTRY_PORT=8786
-REGISTRY_DB_PATH=./registry.db
-
-# S3 Configuration
-REGISTRY_BUCKET_URL=http://localhost:9000/
-REGISTRY_BUCKET_NAME=cpm-registry
-REGISTRY_S3_REGION=us-east-1
-REGISTRY_S3_ACCESS_KEY=your_access_key
-REGISTRY_S3_SECRET_KEY=your_secret_key
-
-# Optional: Public URL
-# REGISTRY_PUBLIC_BASE_URL=http://your.domain.com:8786
-```
-
----
-
-## Advanced Usage
-
-### Language-Specific Chunking
-
-CPM automatically selects optimal chunking strategies based on file types:
-
-- **Python**: AST-based chunking preserving function and class boundaries
-- **Java**: Structure-aware parsing maintaining method scope
-- **Markdown**: Header-hierarchy respecting chunks
-- **Generic Code**: Tree-sitter powered parsing for 40+ languages
-- **Plain Text**: Token-budget aware chunking with semantic boundaries
-
-### Model Context Protocol (MCP) Integration
-
-CPM can be integrated with Claude and other MCP-compatible clients to provide context retrieval capabilities directly
-within AI conversations.
-
-#### Starting the MCP Server
-
-```bash
-# Start MCP server (stdio mode for Claude integration)
-cpm mcp serve
-```
-
-Available MCP tools:
-
-- `lookup`: List installed context packets
-- `query`: Search packets for relevant context
-
-#### Claude Desktop Integration
-
-To integrate CPM with Claude Desktop, add the following configuration to your Claude config file:
-
-**Location of Claude config file:**
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-**Configuration example:**
+Native Model Context Protocol (MCP) support. Expose your context packets as tools directly in Claude Desktop:
 
 ```json
 {
   "mcpServers": {
-    "context-packet-manager": {
-      "command": "C:/path/to/context-packet-manager/cpm/.venv/Scripts/cpm.exe",
+    "cpm": {
+      "command": "cpm",
       "args": [
-        "mcp",
-        "serve"
-      ],
+        "mcp:serve"
+      ]
+    }
+  }
+}
+```
+
+Claude can now search your docs, code, and knowledge bases conversationally!
+
+### 📦 Package Management
+
+Versioned packets with semantic versioning, pinning, and pruning:
+
+```bash
+cpm pkg list                      # List installed packets
+cpm pkg use my-packet@1.2.0       # Pin specific version
+cpm pkg prune my-packet --keep 2  # Keep 2 latest versions
+```
+
+---
+
+## 🏃 Quick Start
+
+### Installation
+
+```bash
+# Clone repository
+git clone https://github.com/AEndrix03/component-rag.git
+cd component-rag
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install CPM
+pip install -e .
+
+# Install dev dependencies (optional)
+pip install -e ".[dev]"  # black, ruff, mypy, pytest
+```
+
+### Initialize Workspace
+
+```bash
+# Create .cpm/ workspace structure
+cpm init
+
+# Verify installation
+cpm doctor
+```
+
+### Configure OpenAI-Compatible Embeddings Adapter
+
+Point CPM to an adapter exposing `POST /v1/embeddings`:
+
+```bash
+cpm embed add \
+  --name adapter-local \
+  --url http://127.0.0.1:8080 \
+  --model text-embedding-3-small \
+  --dims 768 \
+  --set-default
+```
+
+Minimal `.cpm/config/embeddings.yml` example:
+
+```yaml
+default: adapter-local
+providers:
+  - name: adapter-local
+    type: http
+    url: http://127.0.0.1:8080
+    model: text-embedding-3-small
+    dims: 768
+    http:
+      path: /v1/embeddings
+    hints:
+      normalize: true
+```
+
+Supported hint headers sent by CPM connector:
+- `X-Embedding-Dim`
+- `X-Embedding-Normalize`
+- `X-Embedding-Task`
+- `X-Model-Hint`
+
+See `cpm_builtin/embeddings/README.md` for full adapter spec, Docker Compose examples, and troubleshooting.
+
+### Build Your First Packet
+
+```bash
+# Start embedding server (or use remote service)
+# (See embedding server docs for setup)
+
+# Build a context packet from your docs
+cpm build \
+  --source ./docs \
+  --destination ./packets/my-docs \
+  --model jinaai/jina-embeddings-v2-base-code \
+  --packet-version 1.0.0
+```
+
+**Output:**
+
+```
+[scan] files_indexed=145 chunks_total=1250
+[cache] enabled: cached_vectors=0 dim=768
+[embed] missing_vectors shape=(1250, 768)
+[faiss] ntotal=1250
+[done] build ok
+```
+
+### Query Your Packet
+
+```bash
+# Query for relevant context (auto-detects retriever from project config)
+cpm query \
+  --packet my-docs \
+  --query "authentication setup" \
+  -k 5
+
+# Or specify a custom retriever
+cpm query --packet my-docs --query "auth" --retriever custom-retriever
+```
+
+### Use with Claude Desktop
+
+1. **Configure Claude Desktop**
+
+   Edit `~/.config/Claude/claude_desktop_config.json` (Linux) or equivalent:
+
+   ```json
+   {
+     "mcpServers": {
+       "cpm": {
+         "command": "/path/to/.venv/bin/cpm",
+         "args": ["mcp:serve"],
+         "env": {
+           "RAG_CPM_DIR": "/path/to/workspace/.cpm"
+         }
+       }
+     }
+   }
+   ```
+
+2. **Restart Claude Desktop**
+
+3. **Use in conversation:**
+   ```
+   You: "What packets are available?"
+   Claude: [calls lookup tool] I can see 3 context packets...
+
+   You: "Search my-docs for authentication examples"
+   Claude: [calls query tool] Here are the relevant sections...
+   ```
+
+---
+
+## 🏗️ Architecture
+
+CPM follows a modular, plugin-based architecture:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         CPM                            │
+└─────────────────────────────────────────────────────────────┘
+
+         cpm_cli                     CLI Entry Point
+            │
+            ├─ Command Resolution
+            └─ Token Parsing
+                    │
+                    ▼
+         ┌──────────────────────┐
+         │     cpm_core         │   Foundation Layer
+         │                      │
+         │  • CPMApp            │   Application Bootstrap
+         │  • FeatureRegistry   │   Command/Plugin Registry
+         │  • PluginManager     │   Plugin Discovery/Loading
+         │  • Workspace         │   .cpm/ Management
+         │  • EventBus          │   Lifecycle Hooks
+         │  • ServiceContainer  │   Dependency Injection
+         └──────────────────────┘
+                    │
+        ┌───────────┼───────────┐
+        │           │           │
+        ▼           ▼           ▼
+  ┌─────────┐ ┌─────────┐ ┌──────────┐
+  │ Plugins │ │Builtins │ │  Build   │
+  │         │ │         │ │  System  │
+  │ • MCP   │ │• Init   │ │• Chunker │
+  │ • ...   │ │• Doctor │ │• Embedder│
+  └─────────┘ └─────────┘ │• FAISS   │
+                           └──────────┘
+                                │
+                                ▼
+                    ┌───────────────────┐
+                    │  Context Packet   │
+                    │                   │
+                    │  • docs.jsonl     │
+                    │  • vectors.f16    │
+                    │  • faiss/index    │
+                    │  • manifest.json  │
+                    └───────────────────┘
+```
+
+### Package Structure
+
+```
+component-rag/
+├── cpm_core/           🏗️  Foundation layer (app, plugins, registry)
+├── cpm_cli/            🖥️  CLI routing and command resolution
+├── cpm_builtin/        🧰  Built-in features (chunking, embeddings, packages)
+└── cpm_plugins/        🔌  Official plugins (MCP, etc.)
+```
+
+**[📚 See Architecture Docs](./DOCUMENTATION.md) for detailed component documentation**
+
+---
+
+## 🔌 Plugin System
+
+CPM is built for extensibility. Create custom commands without touching core code.
+
+### Create a Plugin in 3 Steps
+
+**1. Create plugin directory:**
+
+```bash
+mkdir -p .cpm/plugins/my-plugin
+cd .cpm/plugins/my-plugin
+```
+
+**2. Create `plugin.toml`:**
+
+```toml
+[plugin]
+id = "my-plugin"
+name = "My Custom Plugin"
+version = "1.0.0"
+entrypoint = "entrypoint:register_plugin"
+```
+
+**3. Create `entrypoint.py`:**
+
+```python
+from cpm_core.api import CPMAbstractCommand, cpmcommand
+from cpm_core.plugin import PluginContext
+
+
+@cpmcommand(name="hello", group="my-plugin")
+class HelloCommand(CPMAbstractCommand):
+    """Say hello to the user."""
+
+    def configure(self, parser):
+        parser.add_argument("--name", default="World")
+
+    def run(self, args):
+        print(f"Hello, {args.name}!")
+        return 0
+
+
+def register_plugin(ctx: PluginContext):
+    ctx.logger.info("My plugin loaded!")
+```
+
+**4. Use your plugin:**
+
+```bash
+cpm my-plugin:hello --name CPM
+# Output: Hello, CPM!
+```
+
+**[📖 Plugin Development Guide](./cpm_core/plugin/README.md)**
+
+---
+
+## 🧩 Intelligent Chunking
+
+CPM automatically detects and selects the optimal chunking strategy for your content. If the default doesn't fit,
+simply implement your own builder and pass `--builder your-builder` during build.
+
+### Supported Strategies
+
+| Chunker                | Languages                             | Key Feature                         |
+|------------------------|---------------------------------------|-------------------------------------|
+| **python_ast**         | Python                                | Preserves function/class boundaries |
+| **java**               | Java                                  | Maintains method scope              |
+| **treesitter_generic** | JS, TS, Go, Rust, C/C++, and 35+ more | Syntax tree parsing                 |
+| **markdown**           | Markdown, reStructuredText            | Header hierarchy                    |
+| **text**               | Plain text                            | Token-budget with overlap           |
+| **brace_fallback**     | C-style languages                     | Brace-based sectioning              |
+
+### Extensibility at Every Level
+
+**Builders**: CPM intelligently selects builders based on project structure. Need custom logic?
+
+```bash
+cpm build --source ./docs --builder my-custom-builder
+```
+
+**Retrievers**: Auto-detected from project configuration, or explicitly specified:
+
+```bash
+cpm query --packet my-docs --query "search" --retriever my-custom-retriever
+```
+
+**Hierarchical Chunking**: Built-in support for multi-level chunking:
+
+```python
+config = ChunkingConfig(
+    hierarchical=True,
+    chunk_tokens=800,  # Parent chunk size
+    micro_chunk_tokens=220,  # Child chunk size
+    emit_parent_chunks=False,  # Only index children
+)
+```
+
+**[📖 Chunking Documentation](./cpm_builtin/chunking/README.md)**
+
+---
+
+## 🤖 MCP Integration
+
+CPM includes a built-in **Model Context Protocol** plugin for seamless Claude Desktop integration.
+
+### MCP Tools
+
+#### `lookup` - List Packets
+
+```json
+{
+  "name": "lookup",
+  "description": "List available context packets",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "cpm_dir": {
+        "type": "string",
+        "optional": true
+      }
+    }
+  }
+}
+```
+
+#### `query` - Semantic Search
+
+```json
+{
+  "name": "query",
+  "description": "Search context packets for relevant information",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "packet": {
+        "type": "string",
+        "required": true
+      },
+      "query": {
+        "type": "string",
+        "required": true
+      },
+      "k": {
+        "type": "number",
+        "default": 5
+      }
+    }
+  }
+}
+```
+
+### Integration Example
+
+```javascript
+// Claude Desktop config
+{
+  "mcpServers": {
+    "cpm": {
+      "command": "cpm",
+      "args": ["mcp:serve"],
       "env": {
-        "RAG_CPM_DIR": "C:/path/to/context-packet-manager/.cpm",
+        "RAG_CPM_DIR": "/path/to/.cpm",
         "RAG_EMBED_URL": "http://127.0.0.1:8876"
       }
     }
   }
 }
-
 ```
 
-**Platform-specific Python paths:**
-
-**Windows:**
-
-```json
-"command": "C:/path/to/your/project/.venv/Scripts/python.exe"
-```
-
-**macOS/Linux:**
-
-```json
-"command": "/path/to/your/project/.venv/bin/python"
-```
-
-**Configuration parameters:**
-
-- `command`: Full path to Python interpreter in your virtual environment
-- `args`: Arguments to launch the MCP server module
-- `env.PYTHONPATH`: Path to your CPM source directory
-- `env.RAG_CPM_DIR`: Path to your `.cpm` directory containing installed packets
-- `env.RAG_EMBED_URL`: URL of your embedding server (must be running)
-
-**Complete setup example:**
-
-1. Install CPM and activate virtual environment
-2. Start embedding server:
-   ```bash
-   cpm embed start-server --detach
-   ```
-3. Build or install context packets
-4. Add MCP configuration to Claude config file
-5. Restart Claude Desktop
-
-Once configured, Claude will have access to your context packets through the `lookup` and `query` tools. You can ask
-Claude to search your documentation, code, or any indexed content directly in conversation.
-
-**Example usage in Claude:**
+**Conversation with Claude:**
 
 ```
-User: Search my project documentation for authentication setup
-Claude: [Uses query tool to search relevant packet]
+User: Search my python-stdlib packet for file I/O examples
+
+Claude: [Calls query tool]
+Here are the most relevant sections from python-stdlib:
+
+1. **File Operations (score: 0.92)**
+   "The `open()` function is the primary way to work with files..."
+
+2. **Context Managers (score: 0.89)**
+   "Using `with open()` ensures proper file closure..."
 ```
 
-### Dynamic Model Management
+**[📖 MCP Plugin Documentation](./cpm_plugins/mcp/README.md)**
+
+---
+
+## 📦 Built-in Commands
+
+| Command                     | Description                            |
+|-----------------------------|----------------------------------------|
+| `cpm init`                  | Initialize CPM workspace               |
+| `cpm doctor`                | Validate workspace and diagnose issues |
+| `cpm build`                 | Build a context packet from source     |
+| `cpm pkg list`              | List installed packets                 |
+| `cpm pkg use <pkg@version>` | Pin a packet version                   |
+| `cpm pkg prune <pkg>`       | Remove old packet versions             |
+| `cpm plugin:list`           | List loaded plugins                    |
+| `cpm plugin:doctor`         | Diagnose plugin issues                 |
+| `cpm mcp:serve`             | Start MCP server for Claude            |
+
+**[📖 Command Reference](./cpm_cli/README.md)**
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable         | Purpose                  | Default                      |
+|------------------|--------------------------|------------------------------|
+| `RAG_CPM_DIR`    | Workspace root directory | `.cpm`                       |
+| `RAG_EMBED_URL`  | Embedding server URL     | `http://127.0.0.1:8876`      |
+| `CPM_CONFIG`     | Main config file path    | `.cpm/config/cpm.toml`       |
+| `CPM_EMBEDDINGS` | Embeddings config path   | `.cpm/config/embeddings.yml` |
+
+### Workspace Structure
+
+```
+.cpm/
+├── packages/           # Installed context packets
+│   └── <name>/
+│       └── <version>/
+├── config/             # Configuration files
+│   ├── cpm.toml        # Main configuration
+│   └── embeddings.yml  # Embedding providers
+├── plugins/            # Workspace plugins
+├── cache/              # Query result caches
+├── state/              # Runtime state (pins, active versions)
+├── logs/               # Application logs
+└── pins/               # Version pin files
+```
+
+---
+
+## 📚 Documentation
+
+CPM includes comprehensive documentation for every component:
+
+### 📖 Core Documentation
+
+- **[cpm_core](./cpm_core/README.md)** - Foundation layer architecture
+- **[cpm_core/api](./cpm_core/api/README.md)** - Extension interfaces
+- **[cpm_core/plugin](./cpm_core/plugin/README.md)** - Plugin system deep dive
+- **[cpm_core/registry](./cpm_core/registry/README.md)** - Feature registry
+- **[cpm_core/build](./cpm_core/build/README.md)** - Build system internals
+- **[cpm_core/packet](./cpm_core/packet/README.md)** - Packet data structures
+
+### 🧰 Built-in Features
+
+- **[cpm_builtin/chunking](./cpm_builtin/chunking/README.md)** - Chunking strategies
+- **[cpm_builtin/embeddings](./cpm_builtin/embeddings/README.md)** - Embedding management
+- **[cpm_builtin/packages](./cpm_builtin/packages/README.md)** - Package management
+
+### 🔌 Plugins
+
+- **[cpm_plugins/mcp](./cpm_plugins/mcp/README.md)** - MCP plugin for Claude Desktop
+
+### 🗺️ Navigation
+
+- **[DOCUMENTATION.md](./DOCUMENTATION.md)** - Complete documentation index
+
+---
+
+## 🛠️ Development
+
+### Prerequisites
+
+- Python 3.11+
+- Virtual environment recommended
+
+### Setup Development Environment
 
 ```bash
-# Register new model at runtime
-cpm embed register --model sentence-transformers/all-MiniLM-L6-v2 \
-  --type local_st --alias minilm
+# Clone and install
+git clone https://github.com/AEndrix03/component-rag.git
+cd component-rag
+python -m venv .venv
+source .venv/bin/activate
 
-# Enable/disable models
-cpm embed enable --model minilm
-cpm embed disable --model minilm
+# Install with dev dependencies
+pip install -e ".[dev]"
 
-# Set or update aliases
-cpm embed set-alias --model minilm --alias mini-lm-v6
-
-# Unregister models
-cpm embed unregister --model mini-lm-v6
+# Install pre-commit hooks
+pre-commit install
 ```
 
-### Package Lifecycle Management
+### Running Tests
 
 ```bash
-# Check available versions on registry
-cpm list-remote my-packet --registry http://localhost:8786
+# Run all tests
+pytest
 
-# Update to latest version
-cpm update my-packet --registry http://localhost:8786
+# Run with coverage
+pytest --cov=cpm_core --cov=cpm_builtin --cov=cpm_cli
 
-# Pin specific version
-cpm use my-packet@1.2.0
+# Run specific test file
+pytest tests/test_core.py
 
-# Remove old versions (keep 2 latest)
-cpm prune my-packet --keep 2
-
-# Clear query cache
-cpm cache clear --packet my-packet
+# Run with verbose output
+pytest -v
 ```
 
----
-
-## API Reference
-
-### Embedding Server API
-
-**POST** `/embed`
-
-Generate embeddings for text inputs.
+### Code Quality
 
 ```bash
-curl -X POST "http://127.0.0.1:8876/embed" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "model": "jina-en",
-           "texts": ["Hello, world!", "Another text to embed"],
-           "options": {
-             "normalize": true,
-             "max_seq_length": 512
-           }
-         }'
-```
+# Format code
+black .
 
-**Response:**
+# Lint
+ruff check .
 
-```json
-{
-  "embeddings": [
-    [
-      0.1,
-      0.2,
-      ...
-    ],
-    [
-      0.3,
-      0.4,
-      ...
-    ]
-  ],
-  "model": "jinaai/jina-embeddings-v2-base-en",
-  "dimension": 768
-}
-```
-
-**GET** `/health`
-
-Check server health and model status.
-
-**GET** `/status`
-
-Detailed information about loaded models and server configuration.
-
-### MCP Protocol Tools
-
-#### `lookup` Tool
-
-List installed context packets.
-
-**Parameters:**
-
-- `cpm_dir` (optional): CPM root directory path
-
-**Returns:**
-
-```json
-{
-  "ok": true,
-  "cpm_dir": "/path/to/.cpm",
-  "packets": [
-    {
-      "name": "my-knowledge-base",
-      "version": "1.0.0",
-      "description": "Documentation for project X",
-      "tags": [
-        "docs",
-        "api"
-      ],
-      "docs": 250,
-      "vectors": 5000,
-      "embedding_model": "jinaai/jina-embeddings-v2-base-en",
-      "embedding_dim": 768
-    }
-  ],
-  "count": 1
-}
-```
-
-#### `query` Tool
-
-Search packet for relevant context.
-
-**Parameters:**
-
-- `packet` (required): Packet name or path
-- `query` (required): Search query text
-- `k` (optional): Number of results (default: 5)
-- `cpm_dir` (optional): CPM root directory
-- `embed_url` (optional): Override embedding server URL
-
-**Returns:**
-
-```json
-{
-  "ok": true,
-  "packet": "my-knowledge-base",
-  "query": "authentication setup",
-  "k": 5,
-  "results": [
-    {
-      "score": 0.89,
-      "id": "chunk-42",
-      "text": "To configure authentication, add the following...",
-      "metadata": {
-        "path": "docs/auth.md",
-        "ext": ".md"
-      }
-    }
-  ]
-}
+# Type check
+mypy .
 ```
 
 ---
 
-## Command Reference
+## 🤝 Contributing
 
-### CPM Core Commands
+Contributions are welcome! Please follow these guidelines:
 
-| Command           | Description                         |
-|-------------------|-------------------------------------|
-| `cpm init`        | Initialize configuration directory  |
-| `cpm lookup`      | List installed packets              |
-| `cpm query`       | Search packet for context           |
-| `cpm build`       | Create new context packet           |
-| `cpm publish`     | Publish packet to registry          |
-| `cpm install`     | Install packet from registry        |
-| `cpm uninstall`   | Remove installed packet             |
-| `cpm update`      | Update packet to newer version      |
-| `cpm use`         | Pin specific packet version         |
-| `cpm list-remote` | Show available versions on registry |
-| `cpm prune`       | Remove old packet versions          |
-| `cpm cache clear` | Clear query cache                   |
+1. **Fork the repository**
+2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Write tests** for new functionality
+4. **Ensure code quality** (black, ruff, mypy pass)
+5. **Commit with clear messages** (`git commit -m 'Add amazing feature'`)
+6. **Push to your fork** (`git push origin feature/amazing-feature`)
+7. **Open a Pull Request**
 
-### Embedding Pool Commands
+### Development Guidelines
 
-| Command                  | Description            |
-|--------------------------|------------------------|
-| `cpm embed start-server` | Start embedding server |
-| `cpm embed stop-server`  | Stop background server |
-| `cpm embed status`       | Check server health    |
-| `cpm embed register`     | Register new model     |
-| `cpm embed enable`       | Enable model           |
-| `cpm embed disable`      | Disable model          |
-| `cpm embed set-alias`    | Set model alias        |
-| `cpm embed unregister`   | Remove model           |
-
-### Registry Commands
-
-| Command               | Description           |
-|-----------------------|-----------------------|
-| `cpm-registry start`  | Start registry server |
-| `cpm-registry stop`   | Stop registry server  |
-| `cpm-registry status` | Check registry status |
-
-### MCP Server Commands
-
-| Command         | Description               |
-|-----------------|---------------------------|
-| `cpm mcp serve` | Start MCP protocol server |
+- Follow [PEP 8](https://peps.python.org/pep-0008/) style guide
+- Use type hints for all functions
+- Write docstrings for public APIs
+- Add tests for bug fixes and new features
+- Update documentation for user-facing changes
 
 ---
 
-## Use Cases
+## 📊 Performance
 
-### Documentation Search
+### Build Performance
 
-Build searchable knowledge bases from technical documentation, API references, and internal wikis. Enable developers to
-quickly find relevant information without manual searching.
+- **Scanning**: ~5,000 files/second
+- **Chunking**: ~2,000 files/second (language-dependent)
+- **Incremental builds**: 90%+ cache hit rate for small edits
 
-### Codebase Understanding
+### Query Performance
 
-Index entire codebases with language-aware chunking. Query for implementation examples, design patterns, or specific
-functionality across millions of lines of code.
-
-### Customer Support
-
-Create context packets from support articles, FAQs, and product documentation. Power chatbots and support tools with
-accurate, up-to-date information.
-
-### Research & Analysis
-
-Index research papers, articles, and reports. Quickly retrieve relevant passages for literature reviews, competitive
-analysis, or market research.
-
-### Team Knowledge Sharing
-
-Publish curated knowledge packets to internal registries. Ensure consistent access to company standards, best practices,
-and institutional knowledge.
-
-### AI-Assisted Development
-
-Integrate with Claude Desktop to provide AI assistants with direct access to your project documentation, codebases, and
-knowledge repositories during development conversations.
-
----
-
-## Performance Characteristics
-
-### Chunking Performance
-
-- **Python AST**: ~1000 files/second
-- **Markdown**: ~2000 files/second
-- **Generic Text**: ~5000 files/second
-
-### Embedding Server
-
-- **Throughput**: Depends on model and hardware
-- **Queue Management**: 1000 requests/model default
-- **Concurrent Processing**: Configurable replica scaling
-
-### Vector Search
-
-- **FAISS Flat IP**: Sub-millisecond queries on 100k vectors
+- **FAISS search**: Sub-millisecond on 100k vectors
 - **Scalability**: Tested with 10M+ vector indices
 - **Memory**: ~4KB per vector (768-dim float32)
 
 ---
 
-## Environment Variables
+## 📄 License
 
-| Variable                 | Description           | Default                 |
-|--------------------------|-----------------------|-------------------------|
-| `CPM_CONFIG`             | Path to config.yml    | `.cpm/config.yml`       |
-| `RAG_CPM_DIR`            | CPM root directory    | `.cpm`                  |
-| `RAG_EMBED_URL`          | Embedding server URL  | `http://127.0.0.1:8876` |
-| `EMBEDPOOL_CONFIG`       | Embedding pool config | `.cpm/config.yml`       |
-| `REGISTRY_BUCKET_URL`    | S3 endpoint URL       | -                       |
-| `REGISTRY_S3_ACCESS_KEY` | S3 access key         | -                       |
-| `REGISTRY_S3_SECRET_KEY` | S3 secret key         | -                       |
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Architecture Diagram
+## 🙏 Acknowledgments
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     CPM Ecosystem                        │
-└─────────────────────────────────────────────────────────┘
+- Built with [FAISS](https://github.com/facebookresearch/faiss) for efficient vector search
+- Uses [Sentence Transformers](https://www.sbert.net/) for embeddings
+- Tree-sitter integration for multi-language parsing
+- FastMCP for Model Context Protocol support
 
-    ┌──────────────┐         ┌──────────────┐
-    │  Source Code │         │  Documents   │
-    │   /docs      │         │   /wiki      │
-    └──────┬───────┘         └──────┬───────┘
-           │                        │
-           └────────┬───────────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │    cpm build        │
-         │  (Chunking Engine)  │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │  Embedding Pool     │
-         │  Server (FastAPI)   │
-         │  Multiple Models    │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │  Context Packet     │
-         │  chunks/ + faiss/   │
-         │  + manifest.json    │
-         └──────────┬──────────┘
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-        ▼                       ▼
-┌──────────────┐      ┌──────────────────┐
-│ cpm query    │      │  cpm publish     │
-│ (Local Use)  │      │  to Registry     │
-└──────┬───────┘      └────────┬─────────┘
-       │                       │
-       │                       ▼
-       │            ┌─────────────────────┐
-       │            │   CPM Registry      │
-       │            │   (S3 + SQLite)     │
-       │            └─────────┬───────────┘
-       │                      │
-       │                      ▼
-       │            ┌─────────────────────┐
-       │            │   cpm install       │
-       │            │   (Team Access)     │
-       │            └─────────────────────┘
-       │
-       └──────────► MCP Integration
-                    (Claude Desktop, etc.)
+---
+
+<div align="center">
+
+**[⬆ Back to Top](#-context-packet-manager)**
+
+Made with ❤️ for Everyone
+
+</div>
+
+## OCI Packaging
+
+CPM supports packaging packets for standard OCI registries (Harbor, GHCR, GitLab, Nexus OCI compatible).
+
+- Packet tag mapping: `name@version -> <registry>/<project>/<name>:<version>`
+- Immutable identity: always consume by digest (`@sha256:...`) after resolve
+- OCI staging layout includes:
+  - `packet.manifest.json`
+  - `packet.lock.json` (when present)
+  - `payload/` (`cpm.yml`, `manifest.json`, `docs.jsonl`, `vectors.f16.bin`, `faiss/index.faiss`)
+
+Digest form example:
+
+```text
+registry.local/project/demo@sha256:<digest>
 ```
 
----
+## OCI Install and Publish
 
-## Contributing
+Example publish/install/query flow with OCI registries:
 
-We welcome contributions to all components of the CPM ecosystem!!!
+```bash
+# Publish a built packet directory
+cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project
 
----
+# Install from OCI by name@version
+cpm install demo@1.0.0 --registry registry.local/project
 
-## Support
+# Query uses selected model from install lock when available
+cpm query --packet demo --query "authentication setup" -k 5
+```
 
-For issues, questions, or feature requests:
+For Harbor, use the project/repository form in `--registry`, for example:
 
-- Open an issue on GitHub
-- Check existing documentation
-- Review example configurations
-
----
-
-**Built with Python, FastAPI, FAISS, and Sentence Transformers**
+```text
+harbor.local/my-project
+```
