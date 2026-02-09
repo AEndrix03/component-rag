@@ -698,3 +698,24 @@ Digest form example:
 ```text
 registry.local/project/demo@sha256:<digest>
 ```
+
+## OCI Install and Publish
+
+Example publish/install/query flow with OCI registries:
+
+```bash
+# Publish a built packet directory
+cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project
+
+# Install from OCI by name@version
+cpm install demo@1.0.0 --registry registry.local/project
+
+# Query uses selected model from install lock when available
+cpm query --packet demo --query "authentication setup" -k 5
+```
+
+For Harbor, use the project/repository form in `--registry`, for example:
+
+```text
+harbor.local/my-project
+```

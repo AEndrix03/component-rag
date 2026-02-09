@@ -836,3 +836,33 @@ pytest cpm_builtin/embeddings/test_connector.py -v
 - [cpm_builtin/chunking/README.md](../chunking/README.md) - Chunking strategies
 - [cpm_core/build/README.md](../../cpm_core/build/README.md) - Build system integration
 - [cpm_core/packet/README.md](../../cpm_core/packet/README.md) - Packet structure
+
+## Discovery and Probe
+
+CPM supports OpenAI-compatible model discovery and probing per provider.
+
+- `GET {base_url}/v1/models` (or configured `http.models_path`) is attempted first.
+- Fallback probe calls `POST {base_url}/v1/embeddings` with minimal input.
+- Discovery cache is stored under `.cpm/cache/embeddings/discovery.json`.
+
+Provider options:
+
+```yaml
+providers:
+  my-provider:
+    type: http
+    url: http://127.0.0.1:8000
+    http:
+      base_url: http://127.0.0.1:8000
+      embeddings_path: /v1/embeddings
+      models_path: /v1/models
+    discovery_ttl_seconds: 900  # set 0 or null to disable TTL caching
+```
+
+CLI commands:
+
+```bash
+cpm embed list --show-discovery
+cpm embed refresh
+cpm embed probe --name my-provider
+```
