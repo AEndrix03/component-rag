@@ -102,6 +102,40 @@ def test_embedding_client_http_mode_uses_openai_endpoint() -> None:
         _stop_server(server)
 
 
+def test_embedding_client_auto_batches_on_too_many_items(monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_embed_texts(self, texts, *, model=None, hints=None, extra=None, normalize=False):
+        del self, model, hints, extra, normalize
+        size = len(list(texts))
+        calls.append(size)
+        if size > 2:
+            raise ValueError(
+                "bad request (status=400) payload_snippet='{\"detail\":{\"message\":\"too many input items\",\"code\":\"invalid_input\"}}'"
+            )
+        return type("_Resp", (), {"vectors": [[1.0, 0.0] for _ in range(size)]})()
+
+    monkeypatch.setattr(
+        "cpm_builtin.embeddings.client.OpenAIEmbeddingsHttpClient.embed_texts",
+        fake_embed_texts,
+    )
+
+    client = EmbeddingClient(base_url="http://127.0.0.1:8876", mode="http", timeout_s=1.0)
+    vectors = client.embed_texts(
+        ["a", "b", "c", "d", "e"],
+        model_name="test-model",
+        max_seq_length=128,
+        normalize=False,
+        dtype="float32",
+        show_progress=False,
+    )
+
+    assert vectors.shape == (5, 2)
+    assert any(size > 2 for size in calls)
+    assert calls[-1] <= 2
+    assert sum(1 for size in calls if size <= 2) >= 2
+
+
 def test_embedding_client_rejects_legacy_mode() -> None:
     with pytest.raises(ValueError, match="must be 'http'"):
         EmbeddingClient(base_url="http://127.0.0.1:8876", mode="legacy")
