@@ -20,6 +20,7 @@ from .packaging import (
     digest_ref_for,
     package_ref_for,
 )
+from .install_state import install_lock_path, read_install_lock, write_install_lock
 
 __all__ = [
     "OciClient",
@@ -42,4 +43,7 @@ __all__ = [
     "build_oci_layout",
     "package_ref_for",
     "digest_ref_for",
+    "install_lock_path",
+    "read_install_lock",
+    "write_install_lock",
 ]

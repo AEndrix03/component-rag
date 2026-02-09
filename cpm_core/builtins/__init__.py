@@ -18,6 +18,7 @@ from .pkg import PkgCommand
 from .query import QueryCommand, register_builtin_retrievers
 from .lookup import LookupCommand
 from .embed import EmbedCommand
+from .install import InstallCommand
 
 __all__ = [
     "register_builtin_commands",
@@ -33,6 +34,7 @@ _BUILTIN_FEATURES: Sequence[type] = (
     PluginDoctorCommand,
     PkgCommand,
     EmbedCommand,
+    InstallCommand,
     LookupCommand,
     HelpCommand,
     ListingCommand,
