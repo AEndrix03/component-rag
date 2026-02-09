@@ -21,3 +21,7 @@ CLAUDE.md
 
 AGENTS.md
 dist/
+
+.serena/
+.tmp_build_llm/
+.*/
