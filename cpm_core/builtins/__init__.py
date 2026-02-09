@@ -19,6 +19,7 @@ from .query import QueryCommand, register_builtin_retrievers
 from .lookup import LookupCommand
 from .embed import EmbedCommand
 from .install import InstallCommand
+from .publish import PublishCommand
 
 __all__ = [
     "register_builtin_commands",
@@ -35,6 +36,7 @@ _BUILTIN_FEATURES: Sequence[type] = (
     PkgCommand,
     EmbedCommand,
     InstallCommand,
+    PublishCommand,
     LookupCommand,
     HelpCommand,
     ListingCommand,
