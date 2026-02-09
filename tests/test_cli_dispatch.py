@@ -132,3 +132,16 @@ def test_group_name_and_colon_resolution(tmp_path: Path, capsys: pytest.CaptureF
     code = cli_main(["sample", "sample-command"], start_dir=tmp_path)
     assert code == 0
     capsys.readouterr()
+
+
+def test_global_version_flag_does_not_shadow_build_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli_main(
+        ["build", "inspect", "--destination", "dist", "--name", "docs", "--version", "1.0.0"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "[cpm:build] packet_dir=" in output
+    assert "cpm v" not in output

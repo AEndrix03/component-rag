@@ -18,3 +18,10 @@ components/
 CLAUDE.md
 
 .claude/
+
+AGENTS.md
+dist/
+
+.serena/
+.tmp_build_llm/
+.*/

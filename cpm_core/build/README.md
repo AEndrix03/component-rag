@@ -299,8 +299,28 @@ created_at: 2024-01-15T10:30:00Z
 ```bash
 cpm build --source ./docs --destination ./packets/docs-v1 \
   --model jinaai/jina-embeddings-v2-base-code \
-  --packet-version 1.0.0
+  --version 1.0.0
 ```
+
+### Example 1b: LLM Builder with Explicit Embedding Model
+
+```bash
+cpm build --source C:\path\to\repo --builder llm:cpm-llm-builder \
+  --name repo-packet --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+### Example 1c: Rebuild Packet to Regenerate vectors/faiss
+
+```bash
+cpm build --source C:\path\to\repo --builder llm:cpm-llm-builder \
+  --name repo-packet --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+`--packet-version` is still supported as a compatibility alias.
 
 ### Example 2: Programmatic Build
 

@@ -180,8 +180,45 @@ cpm build \
   --source ./docs \
   --destination ./packets/my-docs \
   --model jinaai/jina-embeddings-v2-base-code \
-  --packet-version 1.0.0
+  --version 1.0.0
 ```
+
+### Build Scenarios
+
+```bash
+# 1) Standard build (default builder)
+cpm build \
+  --source ./docs \
+  --name my-docs \
+  --version 1.0.0 \
+  --model jinaai/jina-embeddings-v2-base-code \
+  --embed-url http://127.0.0.1:8876
+```
+
+```bash
+# 2) LLM builder (explicit embedding model)
+cpm build \
+  --source C:\path\to\repo \
+  --builder llm:cpm-llm-builder \
+  --name repo-packet \
+  --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+```bash
+# 3) Rebuild same packet/version to regenerate vectors + FAISS
+# (useful if a previous run produced chunks/cache but no vectors/index)
+cpm build \
+  --source C:\path\to\repo \
+  --builder llm:cpm-llm-builder \
+  --name repo-packet \
+  --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+`--packet-version` remains supported as a compatibility alias, but `--version` is preferred.
 
 **Output:**
 

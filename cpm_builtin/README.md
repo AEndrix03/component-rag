@@ -200,8 +200,26 @@ removed = manager.prune("my-package", keep=2)
 ```bash
 cpm build --source ./docs --destination ./packets/docs-v1 \
   --model jinaai/jina-embeddings-v2-base-code \
-  --packet-version 1.0.0
+  --version 1.0.0
 ```
+
+```bash
+# LLM builder with explicit embedding model
+cpm build --source C:\path\to\repo --builder llm:cpm-llm-builder \
+  --name repo-packet --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+```bash
+# Rebuild same packet/version to materialize vectors + faiss
+cpm build --source C:\path\to\repo --builder llm:cpm-llm-builder \
+  --name repo-packet --version 0.0.1 \
+  --model BAAI/bge-base-en-v1.5 \
+  --embed-url http://127.0.0.1:8876
+```
+
+`--packet-version` is still accepted as an alias for compatibility.
 
 **Implementation:** `build.py`
 
