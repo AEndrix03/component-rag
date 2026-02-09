@@ -316,6 +316,9 @@ def materialize_packet(input_data: PacketMaterializationInput) -> PacketManifest
     out_root = input_data.out_root.resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "faiss").mkdir(parents=True, exist_ok=True)
+    docs_path = out_root / "docs.jsonl"
+    write_docs_jsonl(chunks, docs_path)
+    print(f"[write] docs.jsonl -> {docs_path} ({len(chunks)} lines)")
 
     cache_pack = None
     if input_data.incremental_enabled:
@@ -406,10 +409,6 @@ def materialize_packet(input_data: PacketMaterializationInput) -> PacketManifest
         assert vec_missing is not None
         for missing_idx, chunk_idx in enumerate(to_embed_idx):
             final_vecs[chunk_idx] = vec_missing[missing_idx]
-
-    docs_path = out_root / "docs.jsonl"
-    write_docs_jsonl(chunks, docs_path)
-    print(f"[write] docs.jsonl -> {docs_path} ({len(chunks)} lines)")
 
     db = FaissFlatIP(dim=dim)
     db.add(final_vecs)

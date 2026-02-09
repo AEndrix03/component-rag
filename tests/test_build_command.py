@@ -523,3 +523,28 @@ def test_build_embed_generates_vectors_from_existing_chunks(tmp_path: Path, monk
     assert manifest.embedding.model == "new-model"
     assert (packet_dir / "vectors.f16.bin").exists()
     assert (packet_dir / "faiss" / "index.faiss").exists()
+
+
+def test_build_persists_docs_even_when_embedder_unreachable(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "docs"
+    project.mkdir()
+    (project / "intro.md").write_text("Hello\nWorld\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("cpm_builtin.embeddings.client.EmbeddingClient.health", lambda self: False)
+
+    result = cli_main(
+        [
+            "build",
+            "run",
+            "--source",
+            "docs",
+            "--name",
+            "docs",
+            "--version",
+            "0.0.9",
+        ],
+        start_dir=tmp_path,
+    )
+    assert result == 1
+    packet_dir = tmp_path / "dist" / "docs" / "0.0.9"
+    assert (packet_dir / "docs.jsonl").exists()
