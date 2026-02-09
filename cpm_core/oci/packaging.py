@@ -15,10 +15,13 @@ CPM_LAYER_MEDIATYPE = "application/vnd.cpm.packet.layer.v1.tar+gzip"
 CPM_MANIFEST_MEDIATYPE = "application/vnd.cpm.packet.manifest.v1+json"
 CPM_LOCK_MEDIATYPE = "application/vnd.cpm.packet.lock.v1+json"
 
-_DEFAULT_PACKET_FILES = (
+_BASE_PACKET_FILES = (
     "cpm.yml",
     "manifest.json",
     "docs.jsonl",
+)
+
+_EMBED_PACKET_FILES = (
     "vectors.f16.bin",
     "faiss/index.faiss",
 )
@@ -43,7 +46,7 @@ def digest_ref_for(repository: str, name: str, digest: str) -> str:
     return f"{repo}/{name}@{digest}"
 
 
-def build_oci_layout(packet_dir: Path, staging_dir: Path) -> OciPacketLayout:
+def build_oci_layout(packet_dir: Path, staging_dir: Path, *, include_embeddings: bool = True) -> OciPacketLayout:
     packet_dir = packet_dir.resolve()
     if not packet_dir.exists():
         raise FileNotFoundError(f"packet directory not found: {packet_dir}")
@@ -64,7 +67,11 @@ def build_oci_layout(packet_dir: Path, staging_dir: Path) -> OciPacketLayout:
 
     payload_dir = staging_dir / "payload"
     payload_dir.mkdir(parents=True, exist_ok=True)
-    for rel in _DEFAULT_PACKET_FILES:
+    packet_files = list(_BASE_PACKET_FILES)
+    if include_embeddings:
+        packet_files.extend(_EMBED_PACKET_FILES)
+
+    for rel in packet_files:
         src = packet_dir / rel
         if not src.exists():
             continue
@@ -78,6 +85,7 @@ def build_oci_layout(packet_dir: Path, staging_dir: Path) -> OciPacketLayout:
         "packet": {"name": packet_name, "version": packet_version},
         "source_manifest": raw_manifest.to_dict(),
         "payload_root": "payload",
+        "options": {"include_embeddings": include_embeddings},
     }
     oci_manifest_path = staging_dir / CPM_OCI_MANIFEST
     oci_manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")

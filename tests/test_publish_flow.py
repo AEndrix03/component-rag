@@ -52,3 +52,30 @@ def test_publish_uses_oci_layout_and_reports_digest(monkeypatch, tmp_path: Path)
     assert code == 0
     assert str(captured["ref"]).endswith("/demo:1.0.0")
     assert any("packet.manifest.json" in item for item in captured["files"])
+
+
+def test_publish_no_embed_excludes_vectors(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    packet_dir = _create_packet_dir(tmp_path)
+    captured: dict[str, object] = {}
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def push(self, ref, spec):
+            captured["files"] = [str(path) for path in spec.files]
+            return type("PushResult", (), {"ref": ref, "digest": "sha256:" + ("d" * 64)})()
+
+    import cpm_core.builtins.publish as publish_mod
+
+    monkeypatch.setattr(publish_mod, "OciClient", _FakeOciClient)
+    code = cli_main(
+        ["publish", "--from-dir", str(packet_dir), "--registry", "registry.local/project", "--no-embed"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    files = [str(item) for item in captured["files"]]
+    assert not any("vectors.f16.bin" in item for item in files)
+    assert not any("index.faiss" in item for item in files)

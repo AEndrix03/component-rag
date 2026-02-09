@@ -22,6 +22,7 @@ class PublishCommand(_WorkspaceAwareCommand):
         parser.add_argument("--from-dir", required=True, help="Packet directory to publish")
         parser.add_argument("--registry", help="OCI registry repository, e.g. harbor.local/project")
         parser.add_argument("--insecure", action="store_true", help="Allow insecure TLS for OCI operations")
+        parser.add_argument("--no-embed", action="store_true", help="Publish packet without vectors/faiss artifacts")
 
     def run(self, argv: Any) -> int:
         workspace_root = self._resolve(getattr(argv, "workspace_dir", None))
@@ -49,14 +50,17 @@ class PublishCommand(_WorkspaceAwareCommand):
             )
         )
 
+        include_embeddings = not bool(getattr(argv, "no_embed", False))
         with tempfile.TemporaryDirectory(prefix="cpm-publish-") as tmp:
-            layout = build_oci_layout(packet_dir, Path(tmp) / "staging")
+            layout = build_oci_layout(packet_dir, Path(tmp) / "staging", include_embeddings=include_embeddings)
             ref = package_ref_for(name=layout.packet_name, version=layout.packet_version, repository=repository)
             spec = build_artifact_spec(list(layout.files), media_types=layout.media_types)
             result = client.push(ref, spec)
             print(f"[cpm:publish] published {layout.packet_name}@{layout.packet_version}")
             print(f"[cpm:publish] ref={result.ref}")
             print(f"[cpm:publish] digest={result.digest}")
+            if not include_embeddings:
+                print("[cpm:publish] mode=no-embed (vectors/faiss excluded)")
         return 0
 
 

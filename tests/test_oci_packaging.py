@@ -43,6 +43,15 @@ def test_build_oci_layout_collects_expected_files(tmp_path: Path) -> None:
     assert (layout.staging_dir / CPM_OCI_MANIFEST).exists()
 
 
+def test_build_oci_layout_can_exclude_embeddings(tmp_path: Path) -> None:
+    packet = _write_packet_fixture(tmp_path)
+    layout = build_oci_layout(packet, tmp_path / "staging", include_embeddings=False)
+
+    assert (layout.staging_dir / "payload" / "docs.jsonl").exists()
+    assert not (layout.staging_dir / "payload" / "vectors.f16.bin").exists()
+    assert not (layout.staging_dir / "payload" / "faiss" / "index.faiss").exists()
+
+
 def test_ref_mapping_helpers() -> None:
     assert package_ref_for("demo", "1.0.0", "registry.local/project") == "registry.local/project/demo:1.0.0"
     assert (

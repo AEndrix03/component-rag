@@ -32,6 +32,7 @@ class InstallCommand(_WorkspaceAwareCommand):
         parser.add_argument("--provider", help="Preferred embedding provider name")
         parser.add_argument("--insecure", action="store_true", help="Allow insecure TLS for OCI operations")
         parser.add_argument("--force-discovery", action="store_true", help="Force provider discovery refresh")
+        parser.add_argument("--no-embed", action="store_true", help="Install packet without vectors/faiss artifacts")
 
     def run(self, argv: Any) -> int:
         workspace_root = self._resolve(getattr(argv, "workspace_dir", None))
@@ -64,6 +65,7 @@ class InstallCommand(_WorkspaceAwareCommand):
 
         ref = package_ref_for(name=name, version=version, repository=repository)
         digest = client.resolve(ref)
+        no_embed = bool(getattr(argv, "no_embed", False))
 
         with tempfile.TemporaryDirectory(prefix=f"cpm-install-{name}-") as tmp:
             pull_dir = Path(tmp) / "artifact"
@@ -85,24 +87,39 @@ class InstallCommand(_WorkspaceAwareCommand):
             target_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(packet_payload_dir, target_dir)
 
-            source_manifest = payload.get("source_manifest") if isinstance(payload.get("source_manifest"), dict) else {}
-            selection = _select_model(
-                workspace_root=workspace_root,
-                manifest=source_manifest,
-                requested_model=_string_or_none(getattr(argv, "model", None)),
-                requested_provider=_string_or_none(getattr(argv, "provider", None)),
-                force_discovery=bool(getattr(argv, "force_discovery", False)),
-            )
-            if not selection["model"]:
-                print("[cpm:install] unable to resolve embedding model for this packet")
-                return 1
+            if no_embed:
+                vectors_path = target_dir / "vectors.f16.bin"
+                if vectors_path.exists():
+                    vectors_path.unlink()
+                faiss_dir = target_dir / "faiss"
+                if faiss_dir.exists():
+                    shutil.rmtree(faiss_dir)
 
-            model_artifact = _maybe_pull_model_artifact(
-                workspace_root=workspace_root,
-                client=client,
-                provider_name=selection["provider"],
-                model_name=selection["model"],
-            )
+            selected_model = None
+            selected_provider = None
+            suggested_retriever = None
+            model_artifact = None
+            if not no_embed:
+                source_manifest = payload.get("source_manifest") if isinstance(payload.get("source_manifest"), dict) else {}
+                selection = _select_model(
+                    workspace_root=workspace_root,
+                    manifest=source_manifest,
+                    requested_model=_string_or_none(getattr(argv, "model", None)),
+                    requested_provider=_string_or_none(getattr(argv, "provider", None)),
+                    force_discovery=bool(getattr(argv, "force_discovery", False)),
+                )
+                if not selection["model"]:
+                    print("[cpm:install] unable to resolve embedding model for this packet")
+                    return 1
+                selected_model = selection["model"]
+                selected_provider = selection["provider"]
+                suggested_retriever = selection.get("suggested_retriever")
+                model_artifact = _maybe_pull_model_artifact(
+                    workspace_root=workspace_root,
+                    client=client,
+                    provider_name=selected_provider,
+                    model_name=selected_model,
+                )
 
             manager = PackageManager(workspace_root)
             manager.use(f"{name}@{version}")
@@ -112,17 +129,21 @@ class InstallCommand(_WorkspaceAwareCommand):
                 "version": version,
                 "packet_ref": ref,
                 "packet_digest": digest,
-                "selected_model": selection["model"],
-                "selected_provider": selection["provider"],
-                "suggested_retriever": selection.get("suggested_retriever"),
+                "selected_model": selected_model,
+                "selected_provider": selected_provider,
+                "suggested_retriever": suggested_retriever,
                 "installed_at": int(time.time()),
                 "artifact_files": [str(path) for path in pull_result.files],
+                "no_embed": no_embed,
             }
             if model_artifact:
                 lock_payload["model_artifact"] = model_artifact
             lock_path = write_install_lock(workspace_root, name, lock_payload)
             print(f"[cpm:install] installed {name}@{version} digest={digest}")
-            print(f"[cpm:install] selected model={selection['model']} provider={selection['provider']}")
+            if no_embed:
+                print("[cpm:install] mode=no-embed (vectors/faiss removed)")
+            else:
+                print(f"[cpm:install] selected model={selected_model} provider={selected_provider}")
             print(f"[cpm:install] lock={lock_path}")
         return 0
 
