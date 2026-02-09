@@ -5,14 +5,16 @@ from __future__ import annotations
 import json
 import os
 import tomllib
+from datetime import datetime, timezone
 from argparse import ArgumentParser
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from cpm_core.api import cpmcommand
-from cpm_builtin.embeddings import VALID_EMBEDDING_MODES
-from cpm_core.build import DefaultBuilder, DefaultBuilderConfig
+from cpm_builtin.embeddings import EmbeddingClient, VALID_EMBEDDING_MODES
+from cpm_builtin.embeddings.config import EmbeddingsConfigService
+from cpm_core.build import DefaultBuilder, DefaultBuilderConfig, embed_packet_from_chunks
 from cpm_core.packet import (
     DEFAULT_LOCKFILE_NAME,
     artifact_hashes,
@@ -121,6 +123,28 @@ class _BuildInvocation:
     builder: str
 
 
+def _resolve_default_embedding_provider(workspace_root: Path) -> Any:
+    candidates = [workspace_root, workspace_root / "config"]
+    if workspace_root.name == ".cpm":
+        candidates.extend([workspace_root.parent, workspace_root.parent / ".cpm" / "config"])
+    else:
+        candidates.extend([workspace_root / ".cpm", workspace_root / ".cpm" / "config"])
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            provider = EmbeddingsConfigService(resolved).default_provider()
+        except Exception:
+            provider = None
+        if provider is not None:
+            return provider
+    return None
+
+
 def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     config_path = Path(argv.config) if getattr(argv, "config", None) else workspace_root / "config" / BUILD_CONFIG_FILE
     config_data = _load_build_config(config_path)
@@ -183,6 +207,8 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     if archive_format not in SUPPORTED_ARCHIVE_FORMATS:
         archive_format = DefaultBuilderConfig().archive_format
 
+    default_provider = _resolve_default_embedding_provider(workspace_root)
+
     cli_embed_url = getattr(argv, "embed_url", None)
     embed_url = _as_str(
         cli_embed_url,
@@ -190,25 +216,35 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
             embeddings_data.get("url")
             or embeddings_data.get("embed_url")
             or embedding_data.get("embed_url"),
-            os.environ.get("RAG_EMBED_URL") or DefaultBuilderConfig().embed_url,
+            _as_str(default_provider.url if default_provider is not None else None, ""),
         ),
     )
+    if not embed_url:
+        embed_url = _as_str(os.environ.get("RAG_EMBED_URL"), DefaultBuilderConfig().embed_url)
 
     cli_embeddings_mode = getattr(argv, "embeddings_mode", None)
     embeddings_mode = _as_str(
         cli_embeddings_mode,
         _as_str(
             embeddings_data.get("mode"),
-            os.environ.get("RAG_EMBED_MODE") or DefaultBuilderConfig().embeddings_mode,
+            _as_str(default_provider.type if default_provider is not None else None, ""),
         ),
     ).strip().lower()
+    if not embeddings_mode:
+        embeddings_mode = _as_str(os.environ.get("RAG_EMBED_MODE"), DefaultBuilderConfig().embeddings_mode).strip().lower()
     if embeddings_mode not in VALID_EMBEDDING_MODES:
         embeddings_mode = DefaultBuilderConfig().embeddings_mode
 
     timeout = getattr(argv, "timeout", None)
     timeout_value = _as_float(
         timeout,
-        _as_float(embeddings_data.get("timeout"), _as_float(embedding_data.get("timeout"), None)),
+        _as_float(
+            embeddings_data.get("timeout"),
+            _as_float(
+                embedding_data.get("timeout"),
+                _as_float(default_provider.resolved_http_timeout if default_provider is not None else None, None),
+            ),
+        ),
     )
 
     builder_config = DefaultBuilderConfig(
@@ -326,6 +362,10 @@ def _execute_builder(invocation: _BuildInvocation, builder_entry: CPMRegistryEnt
     setattr(argv, "name", invocation.packet_name)
     setattr(argv, "description", invocation.description)
     setattr(argv, "model_name", invocation.config.model_name)
+    setattr(argv, "embed_url", invocation.config.embed_url)
+    setattr(argv, "embeddings_mode", invocation.config.embeddings_mode)
+    setattr(argv, "max_seq_length", invocation.config.max_seq_length)
+    setattr(argv, "timeout", invocation.config.timeout)
 
     run_method = getattr(builder, "run", None)
     if callable(run_method):
@@ -401,6 +441,22 @@ class BuildCommand(_WorkspaceAwareCommand):
         parser.add_argument("--update-lock", action="store_true", help="Regenerate lockfile from current inputs/config")
 
     @classmethod
+    def _configure_embed_options(cls, parser: ArgumentParser) -> None:
+        parser.add_argument("--source", required=True, help="Packet directory containing docs.jsonl")
+        parser.add_argument("--name", help="Override packet name")
+        parser.add_argument("--packet-version", "--version", dest="packet_version", help="Override packet version")
+        parser.add_argument("--description", help="Override packet description")
+        parser.add_argument("--model", "--model-name", dest="model", help="Embedding model identifier")
+        parser.add_argument("--max-seq-length", type=int, help="Maximum tokens per chunk")
+        parser.add_argument("--archive-format", choices=SUPPORTED_ARCHIVE_FORMATS)
+        parser.add_argument("--no-archive", action="store_true")
+        parser.add_argument("--embed-url", help="Embedding server URL")
+        parser.add_argument("--embeddings-mode", choices=VALID_EMBEDDING_MODES, help="Embedding transport mode")
+        parser.add_argument("--timeout", type=float, help="Embedding request timeout (seconds)")
+        parser.add_argument("--lockfile", default=DEFAULT_LOCKFILE_NAME, help="Lockfile name inside packet directory")
+        parser.add_argument("--update-lock", action="store_true", help="Update lockfile artifact hashes if present")
+
+    @classmethod
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--workspace-dir", default=".", help="Workspace root (default: current dir)")
         parser.add_argument("--config", help="Path to build config TOML")
@@ -410,6 +466,9 @@ class BuildCommand(_WorkspaceAwareCommand):
 
         run = sub.add_parser("run", help="Build a packet")
         cls._configure_run_options(run, required=True)
+
+        embed = sub.add_parser("embed", help="Generate vectors/faiss from existing packet chunks")
+        cls._configure_embed_options(embed)
 
         lock = sub.add_parser("lock", help="Generate or update packet lockfile without building artifacts")
         cls._configure_run_options(lock, required=True)
@@ -448,6 +507,71 @@ class BuildCommand(_WorkspaceAwareCommand):
             packet_dir = root / str(getattr(argv, "name", "")) / str(getattr(argv, "packet_version", ""))
             print(f"[cpm:build] packet_dir={packet_dir.resolve()}")
             print(f"[cpm:build] exists={packet_dir.exists()}")
+            return 0
+
+        if action == "embed":
+            raw_source = str(getattr(argv, "source", "") or "").strip()
+            if not raw_source:
+                print("[cpm:build] --source is required for build embed")
+                return 1
+            packet_dir = Path(raw_source)
+            if not packet_dir.is_absolute():
+                packet_dir = (workspace_root / packet_dir).resolve()
+            if not packet_dir.exists():
+                print(f"[cpm:build] packet directory not found: {packet_dir}")
+                return 1
+
+            invocation = _merge_invocation(argv, workspace_root)
+            embedder = EmbeddingClient(
+                invocation.config.embed_url,
+                mode=invocation.config.embeddings_mode,
+                timeout_s=invocation.config.timeout,
+            )
+            manifest = embed_packet_from_chunks(
+                packet_dir,
+                model_name=invocation.config.model_name,
+                max_seq_length=invocation.config.max_seq_length,
+                archive=invocation.config.archive,
+                archive_format=invocation.config.archive_format,
+                embedder=embedder,
+                packet_name_override=_as_str(getattr(argv, "name", None), "").strip() or None,
+                packet_version_override=_as_str(getattr(argv, "packet_version", None), "").strip() or None,
+                description_override=_as_str(getattr(argv, "description", None), "").strip() or None,
+            )
+            if manifest is None:
+                return 1
+
+            lockfile_name = str(getattr(argv, "lockfile", DEFAULT_LOCKFILE_NAME) or DEFAULT_LOCKFILE_NAME).strip()
+            if not lockfile_name:
+                lockfile_name = DEFAULT_LOCKFILE_NAME
+            lock_path = packet_dir / lockfile_name
+            update_lock = bool(getattr(argv, "update_lock", False))
+            if lock_path.exists() or update_lock:
+                if lock_path.exists():
+                    try:
+                        lock_payload = load_lock(lock_path)
+                    except Exception as exc:
+                        print(f"[cpm:build] unable to read lockfile: {exc}")
+                        return 1
+                else:
+                    lock_payload = {
+                        "lockfileVersion": 1,
+                        "packet": {
+                            "name": str(manifest.cpm.get("name") or manifest.packet_id),
+                            "version": str(manifest.cpm.get("version") or ""),
+                        },
+                        "inputs": [],
+                        "pipeline": [],
+                        "models": [],
+                        "artifacts": {},
+                        "resolution": {},
+                    }
+                lock_payload["artifacts"] = artifact_hashes(packet_dir)
+                resolution = lock_payload.get("resolution") if isinstance(lock_payload.get("resolution"), dict) else {}
+                resolution["generated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                lock_payload["resolution"] = resolution
+                write_lock(lock_path, lock_payload)
+                print(f"[cpm:build] lockfile updated: {lock_path}")
             return 0
 
         invocation = _merge_invocation(argv, workspace_root)

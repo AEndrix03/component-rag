@@ -399,3 +399,127 @@ def test_build_command_accepts_version_alias(tmp_path: Path, monkeypatch) -> Non
     packet_dir = tmp_path / "dist" / "docs" / "2.0.0"
     manifest = load_manifest(packet_dir / "manifest.json")
     assert manifest.cpm["version"] == "2.0.0"
+
+
+def test_build_command_uses_default_provider_from_embeddings_config(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "docs"
+    project.mkdir()
+    (project / "intro.md").write_text("Welcome\nThis is a sample project\nEnd", encoding="utf-8")
+    config_dir = tmp_path / ".cpm" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "embeddings.yml").write_text(
+        (
+            "default: local\n"
+            "providers:\n"
+            "  local:\n"
+            "    type: http\n"
+            "    url: http://embed.local:9999\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    def fake_health(self):
+        return self.base_url == "http://embed.local:9999"
+
+    monkeypatch.setattr("cpm_builtin.embeddings.client.EmbeddingClient.health", fake_health)
+
+    def fake_embed_texts(
+        self,
+        texts,
+        *,
+        model_name: str,
+        max_seq_length: int,
+        normalize: bool,
+        dtype: str,
+        show_progress: bool,
+    ):
+        vectors = [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+        return np.asarray(vectors, dtype=np.float32)
+
+    monkeypatch.setattr(
+        "cpm_builtin.embeddings.client.EmbeddingClient.embed_texts",
+        fake_embed_texts,
+    )
+
+    result = cli_main(
+        [
+            "build",
+            "run",
+            "--source",
+            "docs",
+            "--name",
+            "docs",
+            "--version",
+            "3.0.0",
+        ],
+        start_dir=tmp_path,
+    )
+    assert result == 0
+
+
+def test_build_embed_generates_vectors_from_existing_chunks(tmp_path: Path, monkeypatch) -> None:
+    packet_dir = tmp_path / "dist" / "docs" / "1.0.0"
+    (packet_dir / "faiss").mkdir(parents=True, exist_ok=True)
+    (packet_dir / "docs.jsonl").write_text(
+        json.dumps({"id": "chunk-1", "text": "hello", "metadata": {"path": "intro.md", "ext": ".md"}}) + "\n",
+        encoding="utf-8",
+    )
+    (packet_dir / "vectors.f16.bin").write_bytes(b"old")
+    (packet_dir / "faiss" / "index.faiss").write_bytes(b"old")
+    (packet_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "packet_id": "docs",
+                "embedding": {
+                    "provider": "sentence-transformers",
+                    "model": "old-model",
+                    "dim": 4,
+                    "dtype": "float16",
+                    "normalized": True,
+                },
+                "cpm": {"name": "docs", "version": "1.0.0", "description": "old"},
+                "source": {"input_dir": str(tmp_path / "docs"), "file_ext_counts": {".md": 1}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("cpm_builtin.embeddings.client.EmbeddingClient.health", lambda self: True)
+
+    def fake_embed_texts(
+        self,
+        texts,
+        *,
+        model_name: str,
+        max_seq_length: int,
+        normalize: bool,
+        dtype: str,
+        show_progress: bool,
+    ):
+        vectors = [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+        return np.asarray(vectors, dtype=np.float32)
+
+    monkeypatch.setattr(
+        "cpm_builtin.embeddings.client.EmbeddingClient.embed_texts",
+        fake_embed_texts,
+    )
+
+    result = cli_main(
+        [
+            "build",
+            "embed",
+            "--source",
+            str(packet_dir),
+            "--model",
+            "new-model",
+        ],
+        start_dir=tmp_path,
+    )
+    assert result == 0
+    manifest = load_manifest(packet_dir / "manifest.json")
+    assert manifest.embedding.model == "new-model"
+    assert (packet_dir / "vectors.f16.bin").exists()
+    assert (packet_dir / "faiss" / "index.faiss").exists()

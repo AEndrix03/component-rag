@@ -167,3 +167,39 @@ def test_install_provider_with_model_artifact(monkeypatch, tmp_path: Path) -> No
     lock = json.loads((workspace_root / "state" / "install" / "demo.lock.json").read_text(encoding="utf-8"))
     assert lock["model_artifact"]["digest"] == "sha256:" + ("b" * 64)
     assert Path(lock["model_artifact"]["path"]).exists()
+
+
+def test_install_no_embed_skips_model_resolution(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    _write_workspace_config(workspace_root)
+    _write_embeddings_config(workspace_root, with_artifacts=False)
+    packet_artifact = _create_oci_packet_artifact(tmp_path, model="model-a")
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            self.config = config
+
+        def resolve(self, ref: str) -> str:
+            return "sha256:" + ("a" * 64)
+
+        def pull(self, ref: str, output_dir: Path):
+            shutil.copytree(packet_artifact, output_dir, dirs_exist_ok=True)
+            files = tuple(path for path in output_dir.rglob("*") if path.is_file())
+            return type("PullResult", (), {"ref": ref, "digest": None, "files": files})()
+
+    import cpm_core.builtins.install as install_mod
+
+    monkeypatch.setattr(install_mod, "OciClient", _FakeOciClient)
+    monkeypatch.setattr(install_mod, "_select_model", lambda **kwargs: (_ for _ in ()).throw(AssertionError("unexpected")))
+    code = cli_main(
+        ["install", "demo@1.0.0", "--registry", "registry.local/project", "--no-embed"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    target_dir = workspace_root / "packages" / "demo" / "1.0.0"
+    assert not (target_dir / "vectors.f16.bin").exists()
+    assert not (target_dir / "faiss" / "index.faiss").exists()
+    lock = json.loads((workspace_root / "state" / "install" / "demo.lock.json").read_text(encoding="utf-8"))
+    assert lock["no_embed"] is True
+    assert lock["selected_model"] is None
