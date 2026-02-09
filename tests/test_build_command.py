@@ -354,3 +354,48 @@ def test_build_describe_updates_packet_metadata(tmp_path: Path) -> None:
     assert result == 0
     assert "new description" in (packet_dir / "cpm.yml").read_text(encoding="utf-8")
     assert "new description" in (packet_dir / "manifest.json").read_text(encoding="utf-8")
+
+
+def test_build_command_accepts_version_alias(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "docs"
+    project.mkdir()
+    (project / "intro.md").write_text("Welcome\nThis is a sample project\nEnd", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("cpm_builtin.embeddings.client.EmbeddingClient.health", lambda self: True)
+
+    def fake_embed_texts(
+        self,
+        texts,
+        *,
+        model_name: str,
+        max_seq_length: int,
+        normalize: bool,
+        dtype: str,
+        show_progress: bool,
+    ):
+        vectors = [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+        return np.asarray(vectors, dtype=np.float32)
+
+    monkeypatch.setattr(
+        "cpm_builtin.embeddings.client.EmbeddingClient.embed_texts",
+        fake_embed_texts,
+    )
+
+    result = cli_main(
+        [
+            "build",
+            "run",
+            "--source",
+            "docs",
+            "--name",
+            "docs",
+            "--version",
+            "2.0.0",
+        ],
+        start_dir=tmp_path,
+    )
+    assert result == 0
+    packet_dir = tmp_path / "dist" / "docs" / "2.0.0"
+    manifest = load_manifest(packet_dir / "manifest.json")
+    assert manifest.cpm["version"] == "2.0.0"

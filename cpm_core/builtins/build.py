@@ -149,6 +149,8 @@ def _merge_invocation(argv: Any, workspace_root: Path) -> _BuildInvocation:
     packet_dir = destination_root / packet_name / packet_version
 
     cli_model = getattr(argv, "model", None)
+    if cli_model is None:
+        cli_model = getattr(argv, "model_name", None)
     model_name = _as_str(
         cli_model,
         _as_str(embedding_data.get("model"), DefaultBuilderConfig().model_name),
@@ -323,6 +325,7 @@ def _execute_builder(invocation: _BuildInvocation, builder_entry: CPMRegistryEnt
     setattr(argv, "packet_version", invocation.packet_version)
     setattr(argv, "name", invocation.packet_name)
     setattr(argv, "description", invocation.description)
+    setattr(argv, "model_name", invocation.config.model_name)
 
     run_method = getattr(builder, "run", None)
     if callable(run_method):
@@ -376,9 +379,15 @@ class BuildCommand(_WorkspaceAwareCommand):
         parser.add_argument("--source", default=".", help="Source directory (default: current dir)")
         parser.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
         parser.add_argument("--name", required=required, help="Packet name")
-        parser.add_argument("--packet-version", dest="packet_version", required=required, help="Packet version")
+        parser.add_argument(
+            "--packet-version",
+            "--version",
+            dest="packet_version",
+            required=required,
+            help="Packet version",
+        )
         parser.add_argument("--description", help="Packet description")
-        parser.add_argument("--model", help="Embedding model identifier")
+        parser.add_argument("--model", "--model-name", dest="model", help="Embedding model identifier")
         parser.add_argument("--max-seq-length", type=int, help="Maximum tokens per chunk")
         parser.add_argument("--lines-per-chunk", type=int, help="Number of lines per chunk")
         parser.add_argument("--overlap-lines", type=int, help="Overlap lines between chunks")
@@ -411,13 +420,13 @@ class BuildCommand(_WorkspaceAwareCommand):
         describe = sub.add_parser("describe", help="Set or update packet description")
         describe.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
         describe.add_argument("--name", required=True, help="Packet name")
-        describe.add_argument("--packet-version", dest="packet_version", required=True, help="Packet version")
+        describe.add_argument("--packet-version", "--version", dest="packet_version", required=True, help="Packet version")
         describe.add_argument("--description", required=True, help="Description text")
 
         inspect = sub.add_parser("inspect", help="Print resolved packet path")
         inspect.add_argument("--destination", default="dist", help="Destination root (default: ./dist)")
         inspect.add_argument("--name", required=True, help="Packet name")
-        inspect.add_argument("--packet-version", dest="packet_version", required=True, help="Packet version")
+        inspect.add_argument("--packet-version", "--version", dest="packet_version", required=True, help="Packet version")
 
         parser.set_defaults(build_cmd="run")
 
@@ -446,7 +455,7 @@ class BuildCommand(_WorkspaceAwareCommand):
             print("[cpm:build] --name is required")
             return 1
         if not invocation.packet_version:
-            print("[cpm:build] --packet-version is required")
+            print("[cpm:build] --version (alias: --packet-version) is required")
             return 1
 
         invocation.destination_root.mkdir(parents=True, exist_ok=True)

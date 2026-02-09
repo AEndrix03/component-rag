@@ -30,7 +30,7 @@ def main(
     if tokens[0] in ("-h", "--help"):
         return _print_overview(start_dir=start_dir)
 
-    if "--version" in tokens:
+    if len(tokens) == 1 and tokens[0] in ("--version", "-V"):
         print(f"cpm v{CLI_VERSION}")
         return 0
 

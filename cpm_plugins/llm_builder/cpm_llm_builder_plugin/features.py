@@ -127,7 +127,13 @@ class CPMLLMBuilder(CPMAbstractBuilder):
         parser.add_argument("source", help="Source directory to build")
         parser.add_argument("--destination", required=True, help="Destination packet directory")
         parser.add_argument("--name", help="Packet name (defaults to destination directory name)")
-        parser.add_argument("--packet-version", default="0.0.0", help="Packet version for manifest/cpm.yml")
+        parser.add_argument(
+            "--packet-version",
+            "--version",
+            dest="packet_version",
+            default="0.0.0",
+            help="Packet version for manifest/cpm.yml",
+        )
         parser.add_argument("--description", help="Packet description")
         parser.add_argument("--config", help="Plugin config.yml path (default: plugin config.yml)")
         parser.add_argument("--llm-endpoint", help="Override LLM endpoint from config")
@@ -143,7 +149,7 @@ class CPMLLMBuilder(CPMAbstractBuilder):
         parser.add_argument("--max-chunk-tokens", type=int, help="Chunk hard max size")
         parser.add_argument("--min-chunk-tokens", type=int, help="Chunk soft min size")
         parser.add_argument("--max-segments-per-request", type=int, help="LLM batch size")
-        parser.add_argument("--model-name", default=DEFAULT_MODEL, help="Embedding model name")
+        parser.add_argument("--model-name", "--model", default=DEFAULT_MODEL, help="Embedding model name")
         parser.add_argument("--max-seq-length", type=int, default=1024, help="Embedding max sequence length")
         parser.add_argument("--embed-url", default=DEFAULT_EMBED_URL, help="Embedding endpoint URL")
         parser.add_argument("--embeddings-mode", choices=["http", "legacy"], default="http")
