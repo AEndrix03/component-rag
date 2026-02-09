@@ -227,6 +227,12 @@ cpm build --source C:\path\to\repo --builder llm:cpm-llm-builder \
   --model intfloat/multilingual-e5-base
 ```
 
+```bash
+# Re-embed directly from an existing packet (docs.jsonl required)
+cpm build embed --source ./dist/repo-packet/0.0.1 \
+  --model intfloat/multilingual-e5-base
+```
+
 `--packet-version` is still accepted as an alias for compatibility.
 `--source` and `--builder` remain required because chunking is builder-dependent.
 

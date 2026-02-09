@@ -229,9 +229,18 @@ cpm build \
   --model intfloat/multilingual-e5-base
 ```
 
+```bash
+# 5) Re-embed an existing packet directly from docs.jsonl chunks
+# (builder is not required in this mode)
+cpm build embed \
+  --source ./dist/repo-packet/0.0.1 \
+  --model intfloat/multilingual-e5-base
+```
+
 Notes:
 - `--packet-version` remains supported as a compatibility alias, but `--version` is preferred.
-- `--source` and `--builder` are still required for deterministic rebuilds: chunk generation depends on builder behavior and source content.
+- `--source` and `--builder` are still required for deterministic rebuilds (`cpm build run`) because chunk generation depends on builder behavior and source content.
+- `cpm build embed` starts from an already built packet (`docs.jsonl` required) and regenerates `vectors.f16.bin`, `faiss/index.faiss`, and `manifest.json`.
 
 **Output:**
 
@@ -762,6 +771,15 @@ cpm install demo@1.0.0 --registry registry.local/project
 
 # Query uses selected model from install lock when available
 cpm query --packet demo --query "authentication setup" -k 5
+```
+
+```bash
+# Publish/install without vectors (chunks + metadata only)
+cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project --no-embed
+cpm install demo@1.0.0 --registry registry.local/project --no-embed
+
+# Then generate vectors locally with your preferred model/provider
+cpm build embed --source ./.cpm/packages/demo/1.0.0 --model intfloat/multilingual-e5-base
 ```
 
 For Harbor, use the project/repository form in `--registry`, for example:
