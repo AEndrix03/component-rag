@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 CONFIG_FILENAME = "embeddings.yml"
+DEFAULT_DISCOVERY_TTL_SECONDS = 900
 
 
 def _ensure_mapping(data: Any) -> Mapping[str, Any]:
@@ -80,6 +81,8 @@ class EmbeddingProviderConfig:
     extra: dict[str, Any] = field(default_factory=dict)
     http_base_url: str | None = None
     http_path: str = "/v1/embeddings"
+    http_embeddings_path: str | None = None
+    http_models_path: str | None = "/v1/models"
     http_timeout: float | None = None
     http_headers_static: dict[str, str] = field(default_factory=dict)
     hint_dim: int | None = None
@@ -87,6 +90,8 @@ class EmbeddingProviderConfig:
     normalize_mode: str = "auto"
     hint_task: str | None = None
     hint_model: str | None = None
+    discovery_ttl_seconds: int | None = DEFAULT_DISCOVERY_TTL_SECONDS
+    model_artifacts: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: Mapping[str, Any]) -> "EmbeddingProviderConfig":
@@ -149,6 +154,16 @@ class EmbeddingProviderConfig:
             extra=extra_entries,
             http_base_url=str(http_base_url) if http_base_url is not None else None,
             http_path=str(_resolve_env_value(http_raw.get("path", "/v1/embeddings"))),
+            http_embeddings_path=(
+                str(_resolve_env_value(http_raw.get("embeddings_path")))
+                if http_raw.get("embeddings_path") is not None
+                else None
+            ),
+            http_models_path=(
+                str(_resolve_env_value(http_raw.get("models_path")))
+                if http_raw.get("models_path") is not None
+                else "/v1/models"
+            ),
             http_timeout=_to_optional_float(http_raw.get("timeout")),
             http_headers_static=headers_static,
             hint_dim=_to_optional_int(hint_dim),
@@ -160,6 +175,12 @@ class EmbeddingProviderConfig:
                 else None
             ),
             hint_model=str(hint_model) if hint_model is not None else None,
+            discovery_ttl_seconds=_to_optional_int(raw.get("discovery_ttl_seconds")),
+            model_artifacts=(
+                dict(_ensure_mapping(raw.get("model_artifacts")))
+                if raw.get("model_artifacts") is not None
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -167,7 +188,8 @@ class EmbeddingProviderConfig:
             "type": self.type,
             "http": {
                 "base_url": self.resolved_http_base_url,
-                "path": self.resolved_http_path,
+                "embeddings_path": self.resolved_http_embeddings_path,
+                "models_path": self.resolved_http_models_path,
             },
         }
         if self.url:
@@ -204,6 +226,10 @@ class EmbeddingProviderConfig:
             data["hints"] = hints
         if self.normalize_mode != "auto":
             data["normalize_mode"] = self.normalize_mode
+        if self.discovery_ttl_seconds is not None:
+            data["discovery_ttl_seconds"] = int(self.discovery_ttl_seconds)
+        if self.model_artifacts:
+            data["model_artifacts"] = dict(self.model_artifacts)
         return data
 
     @property
@@ -212,7 +238,16 @@ class EmbeddingProviderConfig:
 
     @property
     def resolved_http_path(self) -> str:
-        path = self.http_path or "/v1/embeddings"
+        path = self.http_embeddings_path or self.http_path or "/v1/embeddings"
+        return path if path.startswith("/") else f"/{path}"
+
+    @property
+    def resolved_http_embeddings_path(self) -> str:
+        return self.resolved_http_path
+
+    @property
+    def resolved_http_models_path(self) -> str:
+        path = self.http_models_path or "/v1/models"
         return path if path.startswith("/") else f"/{path}"
 
     @property
@@ -253,10 +288,9 @@ ConnectorFactory = Callable[
 
 class EmbeddingsConfigService:
     def __init__(self, config_dir: Path | str | None = None) -> None:
-        base_dir = Path(config_dir) if config_dir else Path(".cpm")
-        self.config_dir = base_dir.expanduser()
+        self.config_path = _resolve_config_path(config_dir)
+        self.config_dir = self.config_path.parent
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path = self.config_dir / CONFIG_FILENAME
         self._config = self._load()
 
     def _load(self) -> EmbeddingsConfig:
@@ -288,6 +322,14 @@ class EmbeddingsConfigService:
         self.config_path.write_text(
             yaml.safe_dump(payload, sort_keys=False), encoding="utf-8"
         )
+
+    @property
+    def discovery_cache_path(self) -> Path:
+        if self.config_dir.name == "config":
+            base = self.config_dir.parent
+        else:
+            base = self.config_dir
+        return base / "cache" / "embeddings" / "discovery.json"
 
     def list_providers(self) -> list[EmbeddingProviderConfig]:
         return sorted(
@@ -340,3 +382,51 @@ class EmbeddingsConfigService:
         except Exception as exc:
             return False, str(exc), None
         return True, f"received {matrix.shape}", matrix
+
+    def refresh_discovery(
+        self,
+        *,
+        provider_name: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        from .discovery import refresh_provider_discovery
+
+        providers = self.list_providers()
+        if provider_name:
+            providers = [self.get_provider(provider_name)]
+
+        refreshed: dict[str, Any] = {}
+        for provider in providers:
+            ttl = provider.discovery_ttl_seconds
+            result = refresh_provider_discovery(
+                provider,
+                cache_path=self.discovery_cache_path,
+                ttl_seconds=ttl,
+                force=force,
+            )
+            refreshed[provider.name] = result.to_dict()
+        return refreshed
+
+    def read_discovery(self) -> dict[str, Any]:
+        from .discovery import load_cache
+
+        return load_cache(self.discovery_cache_path)
+
+
+def _resolve_config_path(config_dir: Path | str | None) -> Path:
+    if config_dir is None:
+        return Path(".cpm") / "config" / CONFIG_FILENAME
+
+    raw = Path(config_dir).expanduser()
+    if raw.suffix in {".yml", ".yaml"}:
+        return raw
+
+    direct = raw / CONFIG_FILENAME
+    if direct.exists():
+        return direct
+
+    config_child = raw / "config" / CONFIG_FILENAME
+    if (raw / "config").exists() or raw.name == ".cpm":
+        return config_child
+
+    return direct

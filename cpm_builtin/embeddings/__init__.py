@@ -4,6 +4,7 @@ from .cache import EmbeddingCache
 from .client import EmbeddingClient, VALID_EMBEDDING_MODES
 from .connector import HttpEmbeddingConnector
 from .config import EmbeddingProviderConfig, EmbeddingsConfigService
+from .discovery import DiscoveryResult, load_cache, refresh_provider_discovery, save_cache
 from .openai import (
     OpenAIEmbeddingsHttpClient,
     normalize_embeddings,
@@ -20,6 +21,10 @@ __all__ = [
     "HttpEmbeddingConnector",
     "EmbeddingProviderConfig",
     "EmbeddingsConfigService",
+    "DiscoveryResult",
+    "load_cache",
+    "save_cache",
+    "refresh_provider_discovery",
     "EmbedRequestIR",
     "EmbedResponseIR",
     "OpenAIEmbeddingsHttpClient",
