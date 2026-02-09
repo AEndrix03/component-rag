@@ -681,3 +681,20 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 Made with ❤️ for Everyone
 
 </div>
+
+## OCI Packaging
+
+CPM supports packaging packets for standard OCI registries (Harbor, GHCR, GitLab, Nexus OCI compatible).
+
+- Packet tag mapping: `name@version -> <registry>/<project>/<name>:<version>`
+- Immutable identity: always consume by digest (`@sha256:...`) after resolve
+- OCI staging layout includes:
+  - `packet.manifest.json`
+  - `packet.lock.json` (when present)
+  - `payload/` (`cpm.yml`, `manifest.json`, `docs.jsonl`, `vectors.f16.bin`, `faiss/index.faiss`)
+
+Digest form example:
+
+```text
+registry.local/project/demo@sha256:<digest>
+```
