@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -47,6 +48,26 @@ CREATE TABLE IF NOT EXISTS audit_log (
   version TEXT,
   sha256 TEXT,
   remote TEXT
+);
+
+CREATE TABLE IF NOT EXISTS source_resolutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uri TEXT NOT NULL UNIQUE,
+  resolved_uri TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  refs_json TEXT,
+  trust_json TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_resolutions_digest ON source_resolutions(digest);
+
+CREATE TABLE IF NOT EXISTS policy_decisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  reason TEXT,
+  input_json TEXT
 );
 """
 
@@ -203,5 +224,68 @@ class RegistryDB:
                 )
                 """,
                 (name, version),
+            )
+            conn.commit()
+
+    def get_resolution(self, uri: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT uri, resolved_uri, digest, refs_json, trust_json, updated_at
+                FROM source_resolutions
+                WHERE uri = ?
+                """,
+                (uri,),
+            ).fetchone()
+            if not row:
+                return None
+            refs_json = row["refs_json"]
+            trust_json = row["trust_json"]
+            return {
+                "uri": row["uri"],
+                "resolved_uri": row["resolved_uri"],
+                "digest": row["digest"],
+                "refs": json.loads(refs_json) if refs_json else [],
+                "trust": json.loads(trust_json) if trust_json else {},
+                "updated_at": row["updated_at"],
+            }
+
+    def upsert_resolution(
+        self,
+        *,
+        uri: str,
+        resolved_uri: str,
+        digest: str,
+        refs: list[dict[str, Any]] | None = None,
+        trust: dict[str, Any] | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_resolutions(uri, resolved_uri, digest, refs_json, trust_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(uri) DO UPDATE SET
+                    resolved_uri = excluded.resolved_uri,
+                    digest = excluded.digest,
+                    refs_json = excluded.refs_json,
+                    trust_json = excluded.trust_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    uri,
+                    resolved_uri,
+                    digest,
+                    json.dumps(refs or []),
+                    json.dumps(trust or {}),
+                    utcnow_iso(),
+                ),
+            )
+            conn.commit()
+
+    def record_policy_decision(self, *, decision: str, reason: str, payload: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO policy_decisions(ts, decision, reason, input_json) VALUES (?, ?, ?, ?)",
+                (utcnow_iso(), decision, reason, json.dumps(payload, ensure_ascii=False)),
             )
             conn.commit()

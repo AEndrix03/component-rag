@@ -8,7 +8,14 @@ from .errors import (
     OciNotSupportedError,
     OciSecurityError,
 )
-from .types import OciArtifactSpec, OciClientConfig, OciPullResult, OciPushResult
+from .types import (
+    OciArtifactSpec,
+    OciClientConfig,
+    OciPullResult,
+    OciPushResult,
+    OciReferrer,
+    OciVerificationReport,
+)
 from .packaging import (
     CPM_LAYER_MEDIATYPE,
     CPM_LOCK_MEDIATYPE,
@@ -28,6 +35,8 @@ __all__ = [
     "OciArtifactSpec",
     "OciPullResult",
     "OciPushResult",
+    "OciReferrer",
+    "OciVerificationReport",
     "OciError",
     "OciCommandError",
     "OciSecurityError",

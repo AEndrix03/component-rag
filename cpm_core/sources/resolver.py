@@ -7,10 +7,12 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import asdict
 from pathlib import Path
 from typing import Protocol
 
 from cpm_core.oci import OciClient, OciClientConfig
+from cpm_core.oci.security import evaluate_trust_report
 
 from .cache import SourceCache, directory_digest
 from .models import LocalPacket, PacketReference, UpdateInfo
@@ -108,12 +110,30 @@ class OciSource:
 
     def resolve(self, uri: str) -> PacketReference:
         ref = self._to_ref(uri)
-        digest = self._client().resolve(ref)
+        client = self._client()
+        digest = client.resolve(ref)
+        verification_cfg = _load_oci_config(self.workspace_root)
+        strict = bool(verification_cfg.get("strict_verify", True))
+        report = evaluate_trust_report(
+            client.discover_referrers(f"{ref.split('@', 1)[0]}@{digest}"),
+            strict=strict,
+            require_signature=bool(verification_cfg.get("require_signature", True)),
+            require_sbom=bool(verification_cfg.get("require_sbom", True)),
+            require_provenance=bool(verification_cfg.get("require_provenance", True)),
+        )
+        if strict and report.strict_failures:
+            failures = ",".join(report.strict_failures)
+            raise ValueError(f"OCI source verification failed: {failures}")
         return PacketReference(
             uri=uri,
             resolved_uri=f"oci://{ref}",
             digest=digest,
-            metadata={"source": "oci", "ref": ref},
+            metadata={
+                "source": "oci",
+                "ref": ref,
+                "trust_score": report.trust_score,
+                "verification": asdict(report),
+            },
         )
 
     def fetch(self, ref: PacketReference, cache: SourceCache) -> LocalPacket:
@@ -149,8 +169,13 @@ class HubSource:
         parsed = urllib.parse.urlparse(uri)
         query = urllib.parse.parse_qs(parsed.query)
         nested_uri = (query.get("uri") or [None])[0]
+        endpoint = uri
+        if not nested_uri and parsed.scheme in {"http", "https"}:
+            endpoint = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/v1/resolve", "", "", ""))
+            candidate = (query.get("source") or [None])[0]
+            if candidate:
+                nested_uri = candidate
         if nested_uri:
-            endpoint = uri
             payload = json.dumps({"uri": nested_uri}).encode("utf-8")
             request = urllib.request.Request(
                 endpoint,
@@ -169,7 +194,12 @@ class HubSource:
                 uri=uri,
                 resolved_uri=resolved_uri,
                 digest=digest,
-                metadata={"source": "hub", "mode": "resolve"},
+                metadata={
+                    "source": "hub",
+                    "mode": "resolve",
+                    "refs": result.get("refs") if isinstance(result.get("refs"), list) else [],
+                    "trust": result.get("trust") if isinstance(result.get("trust"), dict) else {},
+                },
             )
         return PacketReference(
             uri=uri,

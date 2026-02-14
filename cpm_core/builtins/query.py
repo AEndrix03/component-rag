@@ -347,6 +347,10 @@ class QueryCommand(_WorkspaceAwareCommand):
                 "digest": reference.digest,
                 "cache_key": local_packet.cache_key,
                 "cached": local_packet.cached,
+                "trust_score": reference.metadata.get("trust_score"),
+                "verification": reference.metadata.get("verification"),
+                "refs": reference.metadata.get("refs"),
+                "trust": reference.metadata.get("trust"),
             }
 
         install_lock = None if source_uri else self._ensure_install_lock(workspace_root, packet_name)
@@ -577,6 +581,8 @@ class QueryCommand(_WorkspaceAwareCommand):
             "selected_provider": default_provider.name if default_provider else None,
             "suggested_retriever": str(suggested).strip() if suggested else None,
             "auto_resolved_by_query": True,
+            "sources": [],
+            "trust_score": 0.0,
         }
         write_install_lock(workspace_root, packet_name, payload)
         return payload

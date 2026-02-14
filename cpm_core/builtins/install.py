@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import fnmatch
+from argparse import ArgumentParser
+from dataclasses import asdict
 import json
+from pathlib import Path
 import shutil
 import tempfile
 import time
 import tomllib
-from argparse import ArgumentParser
-from pathlib import Path
 from typing import Any, Iterable
 
 from cpm_builtin.embeddings import EmbeddingsConfigService
 from cpm_builtin.packages import PackageManager, parse_package_spec
 from cpm_core.api import cpmcommand
-from cpm_core.oci import OciClient, OciClientConfig, read_install_lock, write_install_lock
+from cpm_core.oci import OciClient, OciClientConfig, write_install_lock
 from cpm_core.oci.packaging import package_ref_for
+from cpm_core.oci.security import evaluate_trust_report
 
 from .commands import _WorkspaceAwareCommand
 
@@ -65,6 +67,19 @@ class InstallCommand(_WorkspaceAwareCommand):
 
         ref = package_ref_for(name=name, version=version, repository=repository)
         digest = client.resolve(ref)
+        verification = evaluate_trust_report(
+            client.discover_referrers(f"{ref.split('@', 1)[0]}@{digest}"),
+            strict=bool(config.get("strict_verify", True)),
+            require_signature=bool(config.get("require_signature", True)),
+            require_sbom=bool(config.get("require_sbom", True)),
+            require_provenance=bool(config.get("require_provenance", True)),
+        )
+        if verification.strict_failures:
+            print(
+                "[cpm:install] verification failed "
+                f"(strict): {','.join(verification.strict_failures)}"
+            )
+            return 1
         no_embed = bool(getattr(argv, "no_embed", False))
 
         with tempfile.TemporaryDirectory(prefix=f"cpm-install-{name}-") as tmp:
@@ -129,6 +144,23 @@ class InstallCommand(_WorkspaceAwareCommand):
                 "version": version,
                 "packet_ref": ref,
                 "packet_digest": digest,
+                "sources": [
+                    {
+                        "uri": f"oci://{ref}",
+                        "digest": digest,
+                        "signature": verification.signature_valid,
+                        "sbom": verification.sbom_present,
+                        "provenance": verification.provenance_present,
+                        "slsa_level": verification.slsa_level,
+                        "trust_score": verification.trust_score,
+                        "policy": "strict",
+                    }
+                ],
+                "signature": verification.signature_valid,
+                "sbom": verification.sbom_present,
+                "provenance": verification.provenance_present,
+                "trust_score": verification.trust_score,
+                "verification": asdict(verification),
                 "selected_model": selected_model,
                 "selected_provider": selected_provider,
                 "suggested_retriever": suggested_retriever,

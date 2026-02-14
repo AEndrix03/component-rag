@@ -10,6 +10,13 @@
 - `settings.py`: caricamento ambiente/config runtime.
 - `cli.py`: start/stop/status servizio con PID/log file.
 
+## Endpoint Hub context-supply-chain
+- `POST /v1/resolve`: risolve `uri -> digest` e ritorna metadata trust/refs (cache lato DB).
+- `POST /v1/policy/evaluate`: valuta policy runtime (`strict|warn`, allowlist, trust threshold).
+- `GET /v1/capabilities`: capability negotiation per verifica/policy/retrieval.
+
+Il DB mantiene tabelle dedicate (`source_resolutions`, `policy_decisions`) oltre allo schema packages/versioni.
+
 ## Note operative
 - inizializzare schema prima della prima pubblicazione,
 - monitorare stato processo via `registry/src/cli.py status`.

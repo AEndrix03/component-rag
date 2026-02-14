@@ -37,3 +37,22 @@ class OciPushResult:
 class OciArtifactSpec:
     files: tuple[Path, ...]
     media_types: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OciReferrer:
+    digest: str
+    artifact_type: str
+    annotations: Mapping[str, str] = field(default_factory=dict)
+    source: str = "referrers-api"
+
+
+@dataclass(frozen=True)
+class OciVerificationReport:
+    signature_valid: bool
+    sbom_present: bool
+    provenance_present: bool
+    slsa_level: int | None
+    trust_score: float
+    strict_failures: tuple[str, ...] = ()
+    referrers: tuple[OciReferrer, ...] = ()

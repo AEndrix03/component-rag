@@ -774,6 +774,9 @@ cpm install demo@1.0.0 --registry registry.local/project
 cpm query --packet demo --query "authentication setup" -k 5
 ```
 
+Install e source OCI eseguono verifica trust (signature/SBOM/provenance) con default strict fail-closed.
+Il lock install include evidenze in `sources[]`, `verification` e `trust_score`, mantenendo compatibilita con lock legacy.
+
 ```bash
 # Publish/install without vectors (chunks + metadata only)
 cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project --no-embed

@@ -12,7 +12,7 @@ from typing import Mapping
 
 from .errors import OciCommandError, OciNotSupportedError
 from .security import assert_allowlisted, redact_command_for_log
-from .types import OciArtifactSpec, OciClientConfig, OciPullResult, OciPushResult
+from .types import OciArtifactSpec, OciClientConfig, OciPullResult, OciPushResult, OciReferrer
 
 logger = logging.getLogger(__name__)
 _DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
@@ -65,6 +65,19 @@ class OciClient:
         digest = _extract_digest(result.stdout) or _extract_digest(result.stderr)
         return OciPullResult(ref=ref_or_digest, digest=digest, files=files)
 
+    def discover_referrers(self, ref_or_digest: str) -> list[OciReferrer]:
+        assert_allowlisted(ref_or_digest, self.config.allowlist_domains)
+        command = ["oras", "discover", ref_or_digest, "--output", "json"]
+        try:
+            result = self._run(command)
+        except OciCommandError:
+            return self._discover_referrers_from_tags(ref_or_digest)
+
+        parsed = _parse_referrers_payload((result.stdout or "").strip())
+        if parsed:
+            return parsed
+        return self._discover_referrers_from_tags(ref_or_digest)
+
     def push(self, ref: str, artifact: OciArtifactSpec) -> OciPushResult:
         assert_allowlisted(ref, self.config.allowlist_domains)
         command = ["oras", "push", ref]
@@ -79,6 +92,44 @@ class OciClient:
         if not digest:
             digest = self.resolve(ref)
         return OciPushResult(ref=ref, digest=digest)
+
+    def _discover_referrers_from_tags(self, ref_or_digest: str) -> list[OciReferrer]:
+        repository = _repository_for_tags(ref_or_digest)
+        try:
+            tags = self.list_tags(repository)
+        except OciCommandError:
+            return []
+        results: list[OciReferrer] = []
+        for tag in tags:
+            lowered = tag.lower()
+            if lowered.endswith(".sig") or "cosign" in lowered:
+                results.append(
+                    OciReferrer(
+                        digest=f"tag:{tag}",
+                        artifact_type="application/vnd.dev.cosign.simulated.v1+json",
+                        annotations={"tag": tag},
+                        source="referrers-tag",
+                    )
+                )
+            elif lowered.endswith(".sbom") or "sbom" in lowered or "spdx" in lowered or "cyclonedx" in lowered:
+                results.append(
+                    OciReferrer(
+                        digest=f"tag:{tag}",
+                        artifact_type="application/vnd.cpm.sbom.simulated.v1+json",
+                        annotations={"tag": tag},
+                        source="referrers-tag",
+                    )
+                )
+            elif lowered.endswith(".prov") or "provenance" in lowered or "slsa" in lowered:
+                results.append(
+                    OciReferrer(
+                        digest=f"tag:{tag}",
+                        artifact_type="application/vnd.cpm.provenance.simulated.v1+json",
+                        annotations={"tag": tag},
+                        source="referrers-tag",
+                    )
+                )
+        return results
 
     def _run(self, command: list[str], *, fail_on_last: bool = True) -> subprocess.CompletedProcess[str]:
         if self.config.insecure:
@@ -155,3 +206,56 @@ def _format_failure(command: list[str], code: int, stderr: str | None) -> str:
     if detail:
         return f"oras command failed (exit={code}) cmd='{redacted}' err='{detail}'"
     return f"oras command failed (exit={code}) cmd='{redacted}'"
+
+
+def _parse_referrers_payload(payload: str) -> list[OciReferrer]:
+    if not payload:
+        return []
+    try:
+        document = json.loads(payload)
+    except json.JSONDecodeError:
+        return []
+    manifests = None
+    if isinstance(document, dict):
+        if isinstance(document.get("manifests"), list):
+            manifests = document.get("manifests")
+        elif isinstance(document.get("referrers"), list):
+            manifests = document.get("referrers")
+    elif isinstance(document, list):
+        manifests = document
+    if not isinstance(manifests, list):
+        return []
+
+    results: list[OciReferrer] = []
+    for item in manifests:
+        if not isinstance(item, dict):
+            continue
+        digest = str(item.get("digest") or "").strip()
+        artifact_type = str(item.get("artifactType") or item.get("mediaType") or "").strip()
+        annotations = item.get("annotations")
+        safe_annotations = (
+            {str(key): str(value) for key, value in annotations.items()}
+            if isinstance(annotations, dict)
+            else {}
+        )
+        if not digest or not artifact_type:
+            continue
+        results.append(
+            OciReferrer(
+                digest=digest,
+                artifact_type=artifact_type,
+                annotations=safe_annotations,
+            )
+        )
+    return results
+
+
+def _repository_for_tags(ref_or_digest: str) -> str:
+    value = ref_or_digest.strip()
+    if "@" in value:
+        return value.split("@", 1)[0]
+    slash_index = value.rfind("/")
+    colon_index = value.rfind(":")
+    if colon_index > slash_index:
+        return value[:colon_index]
+    return value

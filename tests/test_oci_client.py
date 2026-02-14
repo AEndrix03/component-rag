@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from cpm_core.oci import OciClient, OciClientConfig, build_artifact_spec
+from cpm_core.oci import OciClient, OciClientConfig, OciReferrer, build_artifact_spec
 from cpm_core.oci.errors import OciCommandError, OciSecurityError
-from cpm_core.oci.security import redact_command_for_log
+from cpm_core.oci.security import evaluate_trust_report, redact_command_for_log
 
 
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -103,3 +104,40 @@ def test_redacts_sensitive_args() -> None:
     joined = " ".join(redacted)
     assert "super-secret-password" not in joined
     assert "***" in joined
+
+
+def test_discover_referrers_parses_oras_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "manifests": [
+            {
+                "digest": "sha256:" + ("d" * 64),
+                "artifactType": "application/vnd.dev.cosign.simplesigning.v1+json",
+                "annotations": {"org.opencontainers.artifact.description": "cosign signature"},
+            }
+        ]
+    }
+
+    def _fake_run(command, **kwargs):
+        del kwargs
+        if command[1] == "discover":
+            return _completed(stdout=json.dumps(payload))
+        return _completed(stdout="[]")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
+    referrers = client.discover_referrers("registry.local/team/pkg@sha256:" + ("a" * 64))
+    assert len(referrers) == 1
+    assert referrers[0].artifact_type.startswith("application/vnd.dev.cosign")
+
+
+def test_evaluate_trust_report_strict_fails_when_signature_missing() -> None:
+    referrers = [
+        OciReferrer(
+            digest="sha256:" + ("e" * 64),
+            artifact_type="application/spdx+json",
+            annotations={"kind": "sbom"},
+        )
+    ]
+    report = evaluate_trust_report(referrers, strict=True, require_signature=True, require_sbom=True)
+    assert report.signature_valid is False
+    assert "missing_or_invalid_signature" in report.strict_failures
