@@ -14,6 +14,7 @@ from cpm_builtin.packages.layout import version_dir
 from cpm_core.api import CPMAbstractRetriever, cpmcommand, cpmretriever
 from cpm_core.oci import read_install_lock, write_install_lock
 from cpm_core.registry import CPMRegistryEntry, FeatureRegistry
+from cpm_core.sources import SourceResolver
 
 from .commands import _WorkspaceAwareCommand
 
@@ -301,7 +302,8 @@ class QueryCommand(_WorkspaceAwareCommand):
     @classmethod
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--workspace-dir", default=".", help="Workspace root directory")
-        parser.add_argument("--packet", required=True, help="Packet name or path")
+        parser.add_argument("--packet", help="Packet name or path")
+        parser.add_argument("--source", help="Source URI (dir://, oci://, https://...)")
         parser.add_argument("--query", required=True, help="Query text")
         parser.add_argument("-k", type=int, default=5, help="Number of results to retrieve")
         parser.add_argument("--retriever", help="Retriever name or group:name")
@@ -325,8 +327,29 @@ class QueryCommand(_WorkspaceAwareCommand):
         workspace_root = self._resolve(requested_dir)
         self.workspace_root = workspace_root
 
+        source_uri = str(getattr(argv, "source", "") or "").strip()
         packet_name = str(getattr(argv, "packet", "")).strip()
-        install_lock = self._ensure_install_lock(workspace_root, packet_name)
+        if not packet_name and not source_uri:
+            print("[cpm:query] either --packet or --source is required")
+            return 1
+
+        resolved_reference: dict[str, Any] | None = None
+        if source_uri:
+            try:
+                reference, local_packet = SourceResolver(workspace_root).resolve_and_fetch(source_uri)
+            except Exception as exc:
+                print(f"[cpm:query] unable to materialize source '{source_uri}': {exc}")
+                return 1
+            packet_name = str(local_packet.path)
+            resolved_reference = {
+                "uri": reference.uri,
+                "resolved_uri": reference.resolved_uri,
+                "digest": reference.digest,
+                "cache_key": local_packet.cache_key,
+                "cached": local_packet.cached,
+            }
+
+        install_lock = None if source_uri else self._ensure_install_lock(workspace_root, packet_name)
         requested = self._requested_retriever(argv, workspace_root, install_lock=install_lock)
         entries = self._load_retriever_entries(workspace_root)
 
@@ -360,7 +383,7 @@ class QueryCommand(_WorkspaceAwareCommand):
 
         payload = self._invoke_retriever(
             entry=entry,
-            packet=str(argv.packet),
+            packet=packet_name,
             query=str(argv.query),
             k=int(argv.k),
             cpm_dir=workspace_root,
@@ -370,6 +393,8 @@ class QueryCommand(_WorkspaceAwareCommand):
             reranker=str(getattr(argv, "reranker", DEFAULT_RERANKER)),
             selected_model=str(install_lock.get("selected_model")) if install_lock else None,
         )
+        if resolved_reference:
+            payload["source"] = resolved_reference
 
         if getattr(argv, "format", "text") == "json":
             print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -587,6 +612,12 @@ class QueryCommand(_WorkspaceAwareCommand):
             f"[cpm:query] retriever={retriever_name} packet={payload.get('packet')} k={payload.get('k')} "
             f"indexer={payload.get('indexer', DEFAULT_INDEXER)} reranker={payload.get('reranker', DEFAULT_RERANKER)}"
         )
+        source_data = payload.get("source")
+        if isinstance(source_data, dict):
+            print(
+                f"[cpm:query] source={source_data.get('uri')} digest={source_data.get('digest')} "
+                f"cache_key={source_data.get('cache_key')} cached={source_data.get('cached')}"
+            )
         warnings = payload.get("warnings")
         if isinstance(warnings, list):
             for warning in warnings:
