@@ -83,7 +83,8 @@ class PluginDoctorCommand(_WorkspaceAwareCommand):
             self.resolver.embeddings_filename,
         )
 
-        service = EmbeddingsConfigService(layout.config_dir)
+        # Keep doctor aligned with embed/query/build config resolution.
+        service = EmbeddingsConfigService(workspace_root)
         from cpm_core.app import CPMApp
 
         app = CPMApp(start_dir=workspace_root)
