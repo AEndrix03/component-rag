@@ -20,6 +20,6 @@
 - reranker `NoopReranker` / `TokenDiversityReranker`
 
 ## Osservazioni
-Il flusso e robusto a install lock incompleti e a plugin mancanti, mantenendo fallback al retriever di default.
+Il flusso resta robusto con install lock incompleti e plugin mancanti, mantenendo fallback al retriever di default.
 Quando viene usato `--source`, `query` materializza prima un packet locale in cache e poi interroga il retriever nativo su quel path.
 Il payload include metadata sorgente estesi (`trust_score`, `verification`, `refs`, `trust`) quando disponibili.

@@ -2,6 +2,8 @@
 
 This folder is the technical documentation hub for CPM.
 
+Global index: `DOCUMENTATION.md`.
+
 ## Start Here
 
 If you just cloned CPM and want to run it now:

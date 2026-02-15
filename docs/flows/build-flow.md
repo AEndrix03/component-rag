@@ -5,7 +5,7 @@
 
 ## Flusso run
 1. merge configurazione CLI/workspace,
-2. resolve builder entry,
+2. risolve builder entry,
 3. crea/valida lockfile,
 4. esegue builder,
 5. aggiorna hash artifact nel lock.

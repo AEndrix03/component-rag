@@ -1,22 +1,23 @@
 # Workspace And Config
 
 ## Layout `.cpm`
-- `config/` (es. `embeddings.yml`)
+- `config/` (`config.toml`, `embeddings.yml`)
 - `packages/`
 - `plugins/`
-- file stato lock/install.
+- file stato lock/install/replay/benchmark.
 
 ## Risoluzione config
 `WorkspaceResolver` combina:
 1. override env,
 2. override root espliciti,
-3. config workspace,
+3. config workspace (`.cpm/config/config.toml`),
 4. config user fallback.
 
 ## Buone pratiche
 - mantenere config sensibile fuori dal controllo versione,
 - usare provider default esplicito,
 - verificare path assoluti/relativi in ambienti CI.
+- mantenere `policy.yml` allineato con i vincoli CI.
 
 ## Comandi
 ```powershell
@@ -41,3 +42,4 @@ policy:
 ## Replay e audit
 - Query salva replay log deterministico in `.cpm/state/replay/query-<timestamp>.json`.
 - `cpm replay <log>` ricalcola output hash e verifica riproducibilita.
+- Benchmark salva report in `.cpm/state/benchmarks/benchmark-<timestamp>.json`.
