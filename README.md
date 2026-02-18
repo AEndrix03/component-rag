@@ -78,9 +78,14 @@ cpm benchmark-trend --format json
 
 ```bash
 cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project
+cpm publish --from-dir ./demo --registry http://localhost:5000
 cpm install demo@1.0.0 --registry registry.local/project
 cpm query --packet demo --query "authentication setup"
 ```
+
+Notes:
+- `publish --from-dir` accepts direct packet dir, or packet name shorthand when a unique `./dist/<name>/<version>` exists.
+- `publish --registry` accepts OCI repository or `http(s)://host[:port][/path]` (normalized internally).
 
 ## Policy and Hub
 

@@ -52,6 +52,7 @@ cpm query --packet my-docs --query "auth" --indexer hybrid-rrf
 
 # OCI distribution
 cpm publish --from-dir ./dist/my-docs/1.0.0 --registry registry.local/project
+cpm publish --from-dir ./my-docs --registry http://localhost:5000
 cpm install my-docs@1.0.0 --registry registry.local/project
 
 # Repro/audit
@@ -65,6 +66,7 @@ cpm benchmark --packet my-docs --query "auth" --runs 5
 - If `query` fails with embedding errors: check provider URL/model in `.cpm/config/embeddings.yml`.
 - For lazy registry query, set `--embed <model>` to force model selection (default: `text-embedding-3-small`).
 - If packet is not found: run `cpm lookup` and verify packet/version.
+- For `publish`, if `--from-dir` is a packet name, CPM resolves `./dist/<name>/<version>` only when one version exists.
 - If OCI policy fails: check `.cpm/policy.yml` and optional `[hub]` settings in `.cpm/config/config.toml`.
 
 ## Where to go next
