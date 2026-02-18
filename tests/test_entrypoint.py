@@ -304,6 +304,47 @@ def test_query_command_supports_registry_shortcut_and_embed_override(
     assert captured.get("selected_model") == "mini-model"
 
 
+def test_query_command_registry_shortcut_without_embed_keeps_manifest_model(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+    source_dir = tmp_path / "source-packet"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    (source_dir / "manifest.json").write_text("{}", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _fake_retrieve(self, identifier: str, **kwargs):
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "packet": kwargs.get("packet"),
+            "query": identifier,
+            "k": kwargs.get("k", 5),
+            "results": [],
+        }
+
+    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
+    code = cli_main.main(
+        [
+            "query",
+            "--workspace-dir",
+            str(tmp_path),
+            "--registry",
+            f"dir://{source_dir}",
+            "--query",
+            "auth",
+        ],
+        start_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "source=dir://" in out
+    assert captured.get("selected_model") is None
+
+
 def test_query_command_supports_registry_base_with_packet(
     monkeypatch, tmp_path: Path
 ) -> None:

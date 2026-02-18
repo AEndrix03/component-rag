@@ -31,7 +31,6 @@ DEFAULT_EMBED_MODE = "http"
 DEFAULT_INDEXER = "faiss-flatip"
 HYBRID_INDEXER = "hybrid-rrf"
 DEFAULT_RERANKER = "none"
-DEFAULT_LAZY_EMBED_MODEL = "text-embedding-3-small"
 
 
 class RetrievalIndexer(Protocol):
@@ -169,7 +168,9 @@ class NativeFaissRetriever(CPMAbstractRetriever):
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         embedding_cfg = manifest.get("embedding") or {}
-        model_name = str(kwargs.get("selected_model") or embedding_cfg.get("model") or "").strip()
+        requested_model = str(kwargs.get("selected_model") or "").strip()
+        manifest_model = str(embedding_cfg.get("model") or "").strip()
+        model_name = requested_model or manifest_model
         if not model_name:
             return {
                 "ok": False,
@@ -223,12 +224,38 @@ class NativeFaissRetriever(CPMAbstractRetriever):
                 "packet": packet,
             }
         except Exception as exc:  # pragma: no cover - defensive
-            return {
-                "ok": False,
-                "error": "retrieval_failed",
-                "detail": str(exc),
-                "packet": packet,
-            }
+            if requested_model and manifest_model and requested_model != manifest_model:
+                try:
+                    vector = embedder.embed_texts(
+                        [query],
+                        model_name=manifest_model,
+                        max_seq_length=max_seq_length,
+                        normalize=True,
+                        dtype="float32",
+                        show_progress=False,
+                    )
+                    dense_k = max(int(k), 1)
+                    if indexer_name == HYBRID_INDEXER:
+                        dense_k = max(int(k) * 4, 20)
+                    scores, ids = indexer.search(index=index, vector=vector, k=dense_k)
+                    warnings.append(
+                        f"embedding model '{requested_model}' failed; fallback to manifest model '{manifest_model}'"
+                    )
+                    model_name = manifest_model
+                except Exception:
+                    return {
+                        "ok": False,
+                        "error": "retrieval_failed",
+                        "detail": str(exc),
+                        "packet": packet,
+                    }
+            else:
+                return {
+                    "ok": False,
+                    "error": "retrieval_failed",
+                    "detail": str(exc),
+                    "packet": packet,
+                }
 
         dense_hits: list[dict[str, Any]] = []
         for rank, (idx, score) in enumerate(zip(ids[0], scores[0]), start=1):
@@ -369,7 +396,7 @@ class QueryCommand(_WorkspaceAwareCommand):
         parser.add_argument("--reranker", default=DEFAULT_RERANKER, help="Reranker strategy")
         parser.add_argument(
             "--embed",
-            help=f"Embedding model override for query-time embedding (default lazy model: {DEFAULT_LAZY_EMBED_MODEL})",
+            help="Embedding model override for query-time embedding",
         )
         parser.add_argument("--max-context-tokens", type=int, default=6000, help="Context compiler token cap")
         parser.add_argument("--replay-log", help="Write deterministic replay log to this path")
@@ -496,8 +523,6 @@ class QueryCommand(_WorkspaceAwareCommand):
             if lock_name and lock_version:
                 packet_name = f"{lock_name}@{lock_version}"
         embed_override = str(getattr(argv, "embed", "") or "").strip() or None
-        if embed_override is None and source_uri:
-            embed_override = DEFAULT_LAZY_EMBED_MODEL
 
         requested = self._requested_retriever(argv, workspace_root, install_lock=install_lock)
         entries = self._load_retriever_entries(workspace_root)
