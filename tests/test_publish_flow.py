@@ -108,6 +108,32 @@ def test_publish_resolves_dist_fallback_and_normalizes_http_registry(monkeypatch
     assert str(captured["ref"]) == "localhost:5000/demo:1.0.0"
 
 
+def test_publish_resolves_existing_container_dir(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    _create_packet_dir(tmp_path / "dist")
+    captured: dict[str, object] = {}
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def push(self, ref, spec):
+            captured["ref"] = ref
+            captured["files"] = [str(path) for path in spec.files]
+            return type("PushResult", (), {"ref": ref, "digest": "sha256:" + ("d" * 64)})()
+
+    import cpm_core.builtins.publish as publish_mod
+
+    monkeypatch.setattr(publish_mod, "OciClient", _FakeOciClient)
+    code = cli_main(
+        ["publish", "--from-dir", str(tmp_path / "dist" / "demo"), "--registry", "localhost:5000"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    assert str(captured["ref"]) == "localhost:5000/demo:1.0.0"
+
+
 def test_publish_handles_oci_errors_without_traceback(monkeypatch, tmp_path: Path, capfd) -> None:
     workspace_root = tmp_path / ".cpm"
     monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
@@ -131,3 +157,17 @@ def test_publish_handles_oci_errors_without_traceback(monkeypatch, tmp_path: Pat
     captured = capfd.readouterr()
     assert code == 1
     assert "[cpm:publish] failed: oras CLI not found" in captured.out
+
+
+def test_publish_reports_missing_manifest_for_invalid_from_dir(monkeypatch, tmp_path: Path, capfd) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    invalid_dir = tmp_path / "not-a-packet"
+    invalid_dir.mkdir(parents=True, exist_ok=True)
+    code = cli_main(
+        ["publish", "--from-dir", str(invalid_dir), "--registry", "localhost:5000"],
+        start_dir=tmp_path,
+    )
+    captured = capfd.readouterr()
+    assert code == 1
+    assert "[cpm:publish] no packet found in --from-dir" in captured.out

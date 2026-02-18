@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import time
@@ -80,14 +81,20 @@ class OciClient:
 
     def push(self, ref: str, artifact: OciArtifactSpec) -> OciPushResult:
         assert_allowlisted(ref, self.config.allowlist_domains)
+        if not artifact.files:
+            raise OciCommandError("artifact spec has no files to publish")
+        files = [path.resolve() for path in artifact.files]
+        common_root = Path(os.path.commonpath([str(path.parent) for path in files]))
         command = ["oras", "push", ref]
-        for path in artifact.files:
+        for path in files:
+            rel_path = path.relative_to(common_root)
+            path_arg = rel_path.as_posix()
             media = artifact.media_types.get(path.name) or artifact.media_types.get(str(path))
             if media:
-                command.append(f"{path}:{media}")
+                command.append(f"{path_arg}:{media}")
             else:
-                command.append(str(path))
-        result = self._run(command)
+                command.append(path_arg)
+        result = self._run(command, cwd=common_root)
         digest = _extract_digest(result.stdout) or _extract_digest(result.stderr)
         if not digest:
             digest = self.resolve(ref)
@@ -131,7 +138,13 @@ class OciClient:
                 )
         return results
 
-    def _run(self, command: list[str], *, fail_on_last: bool = True) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        command: list[str],
+        *,
+        fail_on_last: bool = True,
+        cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         if self.config.insecure:
             command = [*command, "--insecure"]
         if self.config.username and self.config.password:
@@ -154,6 +167,7 @@ class OciClient:
                     capture_output=True,
                     text=True,
                     timeout=timeout,
+                    cwd=str(cwd) if cwd is not None else None,
                 )
                 if result.returncode == 0:
                     return result

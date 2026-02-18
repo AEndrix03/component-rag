@@ -28,9 +28,10 @@ def test_resolve_extracts_digest(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_push_falls_back_to_resolve_when_output_has_no_digest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
+    workdirs: list[str | None] = []
 
     def _fake_run(command, **kwargs):
-        del kwargs
+        workdirs.append(kwargs.get("cwd"))
         calls.append(list(command))
         if command[1] == "push":
             return _completed(stdout="pushed")
@@ -50,6 +51,8 @@ def test_push_falls_back_to_resolve_when_output_has_no_digest(monkeypatch: pytes
     assert len(calls) == 2
     assert calls[0][1] == "push"
     assert calls[1][1] == "resolve"
+    assert workdirs[0] is not None
+    assert str(file_path) not in " ".join(calls[0])
 
 
 def test_pull_enforces_size_limit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

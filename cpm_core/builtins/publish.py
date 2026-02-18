@@ -34,7 +34,10 @@ class PublishCommand(_WorkspaceAwareCommand):
         packet_dir = _resolve_packet_dir(requested_packet_dir, workspace_root)
         if packet_dir is None:
             requested_abs = Path(requested_packet_dir).resolve() if requested_packet_dir else Path.cwd()
-            print(f"[cpm:publish] packet directory not found: {requested_abs}")
+            print(
+                "[cpm:publish] no packet found in --from-dir "
+                f"{requested_abs} (manifest.json missing or ambiguous version directory)"
+            )
             return 1
 
         config = _load_oci_config(workspace_root)
@@ -69,11 +72,14 @@ class PublishCommand(_WorkspaceAwareCommand):
                 if not include_embeddings:
                     print("[cpm:publish] mode=no-embed (vectors/faiss excluded)")
             return 0
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"[cpm:publish] failed: {exc}")
+            return 1
         except OciError as exc:
             print(f"[cpm:publish] failed: {exc}")
             return 1
         except Exception as exc:  # pragma: no cover - defensive fallback
-            logger.exception("unexpected error while publishing packet")
+            logger.debug("unexpected error while publishing packet", exc_info=True)
             print(f"[cpm:publish] unexpected failure: {exc}")
             return 1
 
@@ -123,7 +129,11 @@ def _resolve_packet_dir(raw_path: str, workspace_root: Path) -> Path | None:
         direct_candidates.extend([(Path.cwd() / requested).resolve(), (workspace_root.parent / requested).resolve()])
     for candidate in direct_candidates:
         if candidate.exists() and candidate.is_dir():
-            return candidate
+            resolved = _resolve_single_version_dir(candidate)
+            if resolved is not None:
+                if resolved != candidate:
+                    print(f"[cpm:publish] resolved --from-dir {raw_path} -> {resolved}")
+                return resolved
 
     packet_name = requested.name.strip()
     if not packet_name:
@@ -136,6 +146,23 @@ def _resolve_packet_dir(raw_path: str, workspace_root: Path) -> Path | None:
     if len(version_dirs) != 1:
         return None
 
-    resolved = version_dirs[0]
+    resolved = _resolve_single_version_dir(version_dirs[0])
+    if resolved is None:
+        return None
+
     print(f"[cpm:publish] resolved --from-dir {raw_path} -> {resolved}")
     return resolved
+
+
+def _resolve_single_version_dir(candidate: Path) -> Path | None:
+    if _is_packet_dir(candidate):
+        return candidate
+    subdirs = sorted(path for path in candidate.iterdir() if path.is_dir())
+    packet_dirs = [path for path in subdirs if _is_packet_dir(path)]
+    if len(packet_dirs) == 1:
+        return packet_dirs[0]
+    return None
+
+
+def _is_packet_dir(path: Path) -> bool:
+    return (path / "manifest.json").exists()
