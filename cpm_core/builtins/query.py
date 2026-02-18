@@ -432,6 +432,18 @@ class QueryCommand(_WorkspaceAwareCommand):
                         "[cpm:query] hint: OCI registry query usually requires packet version "
                         "(example: --packet 3dp-be@0.0.1)"
                     )
+                message = str(exc).lower()
+                if source_uri.startswith("oci://") and "basic credential not found" in message:
+                    print(
+                        "[cpm:query] hint: registry requires authentication; run "
+                        "`docker login <registry-host>` or configure `[oci].username/password` in "
+                        ".cpm/config/config.toml"
+                    )
+                if source_uri.startswith("oci://") and "oci source verification failed" in message:
+                    print(
+                        "[cpm:query] hint: local/dev registries may need relaxed OCI verification via "
+                        "`.cpm/config/config.toml` (`[oci] strict_verify = false`)"
+                    )
                 return 1
             packet_name = str(local_packet.path)
             resolved_reference = {

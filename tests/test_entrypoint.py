@@ -426,3 +426,34 @@ def test_query_command_keeps_hub_registry_endpoint(
     )
     assert code == 0
     assert resolved["uri"] == url
+
+
+def test_query_command_prints_auth_hint_for_oci_registry(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+
+    def _fake_resolve_and_fetch(self, uri: str):
+        del self, uri
+        raise RuntimeError("oras command failed: basic credential not found")
+
+    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
+    code = cli_main.main(
+        [
+            "query",
+            "--workspace-dir",
+            str(tmp_path),
+            "--packet",
+            "demo@1.0.0",
+            "--registry",
+            "http://localhost:5000",
+            "--query",
+            "auth",
+        ],
+        start_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "basic credential not found" in out
+    assert "docker login <registry-host>" in out
