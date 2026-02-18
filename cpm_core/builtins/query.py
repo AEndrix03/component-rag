@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import urllib.parse
 from argparse import ArgumentParser
 from datetime import UTC, datetime
 from pathlib import Path
@@ -426,6 +427,11 @@ class QueryCommand(_WorkspaceAwareCommand):
                 reference, local_packet = SourceResolver(workspace_root).resolve_and_fetch(source_uri)
             except Exception as exc:
                 print(f"[cpm:query] unable to materialize source '{source_uri}': {exc}")
+                if source_uri.startswith("oci://") and packet_name and "@" not in packet_name and ":" not in packet_name:
+                    print(
+                        "[cpm:query] hint: OCI registry query usually requires packet version "
+                        "(example: --packet 3dp-be@0.0.1)"
+                    )
                 return 1
             packet_name = str(local_packet.path)
             resolved_reference = {
@@ -833,15 +839,31 @@ class QueryCommand(_WorkspaceAwareCommand):
         if not registry:
             return ""
         value = registry.strip()
-        if value.startswith(("oci://", "https://", "http://", "dir://")):
+        if value.startswith("oci://"):
             if packet and value.startswith("oci://") and "@" not in value.split("/")[-1] and ":" not in value.split("/")[-1]:
                 return f"{value.rstrip('/')}/{packet}"
+            return value
+        if value.startswith(("https://", "http://")):
+            if packet and not QueryCommand._looks_like_hub_endpoint(value):
+                parsed = urllib.parse.urlparse(value)
+                repository = "/".join(segment for segment in (parsed.netloc, parsed.path.strip("/")) if segment)
+                if repository:
+                    return f"oci://{repository.rstrip('/')}/{packet}"
+            return value
+        if value.startswith("dir://"):
             return value
         if not packet:
             raise ValueError(
                 "registry base without URI scheme requires --packet (example: --packet demo@1.0.0 --registry harbor.local/project)"
             )
         return f"oci://{value.rstrip('/')}/{packet}"
+
+    @staticmethod
+    def _looks_like_hub_endpoint(registry: str) -> bool:
+        parsed = urllib.parse.urlparse(registry)
+        query = urllib.parse.parse_qs(parsed.query)
+        path = parsed.path.rstrip("/")
+        return path.endswith("/v1/resolve") or "source" in query or "uri" in query
 
     def _write_replay_log(
         self,

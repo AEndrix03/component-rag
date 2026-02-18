@@ -55,6 +55,7 @@ cpm query \
 
 Notes:
 - `--registry` is a lazy source shortcut (`oci://`, `http(s)://`, `dir://`, or OCI repository base).
+- With `query`, `--registry http(s)://host[:port][/repo]` + `--packet` is treated as OCI base (`oci://host[:port][/repo]/<packet>`), unless it is an explicit hub endpoint (`/v1/resolve` or query `source=`/`uri=`).
 - `--embed` overrides query-time embedding model.
 - If `--embed` is omitted in lazy mode, CPM defaults to `text-embedding-3-small`.
 
