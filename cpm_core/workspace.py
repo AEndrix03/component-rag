@@ -68,8 +68,8 @@ class WorkspaceLayout:
             state_dir=root / "state",
             config_dir=root / "config",
             logs_dir=root / "logs",
-            config_file=root / config_filename,
-            embeddings_file=root / embeddings_filename,
+            config_file=(root / "config") / config_filename,
+            embeddings_file=(root / "config") / embeddings_filename,
         )
 
     def ensure(self) -> None:
@@ -185,7 +185,11 @@ class WorkspaceResolver:
         workspace_root = self.find_workspace(start_dir)
         if workspace_root is None:
             return {}
-        return _load_config_from_file(workspace_root / self.config_filename)
+        canonical = workspace_root / "config" / self.config_filename
+        if canonical.exists():
+            return _load_config_from_file(canonical)
+        legacy = workspace_root / self.config_filename
+        return _load_config_from_file(legacy)
 
     def _user_config_layer(self) -> dict[str, str]:
         config_path = self.user_dirs.config_dir() / self.config_filename
