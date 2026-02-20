@@ -148,7 +148,7 @@ from cpm_core.workspace import WorkspaceResolver, WorkspaceLayout
 resolver = WorkspaceResolver()
 workspace_root = resolver.ensure_workspace(start_dir=Path.cwd())
 
-layout = WorkspaceLayout.from_root(workspace_root, "cpm.toml", "embeddings.yml")
+layout = WorkspaceLayout.from_root(workspace_root, "config.toml", "embeddings.yml")
 layout.ensure()  # Creates all directories
 
 print(f"Config: {layout.config_file}")
@@ -221,7 +221,7 @@ TOML-based configuration management with layered resolution:
 ```python
 from cpm_core.config import ConfigStore
 
-config = ConfigStore(path=Path(".cpm/config/cpm.toml"))
+config = ConfigStore(path=Path(".cpm/config/config.toml"))
 
 # Get value with default
 embed_url = config.get("embedding.url", default="http://127.0.0.1:8876")
@@ -235,8 +235,8 @@ config.save()
 
 1. CLI arguments (highest)
 2. Environment variables
-3. Workspace config (`.cpm/config/cpm.toml`)
-4. User config (`~/.cpm/config.toml`)
+3. Workspace config (`.cpm/config/config.toml`)
+4. User config (`<platform config dir>/cpm/config.toml`)
 5. Defaults (lowest)
 
 ---
@@ -409,7 +409,7 @@ print(f"Config path: {config.path}")
 | Variable         | Purpose                 | Default                      |
 |------------------|-------------------------|------------------------------|
 | `RAG_CPM_DIR`    | Override workspace root | `.cpm`                       |
-| `CPM_CONFIG`     | Config file path        | `.cpm/config/cpm.toml`       |
+| `CPM_CONFIG`     | Config file path        | `.cpm/config/config.toml`    |
 | `CPM_EMBEDDINGS` | Embeddings config path  | `.cpm/config/embeddings.yml` |
 | `RAG_EMBED_URL`  | Embedding server URL    | `http://127.0.0.1:8876`      |
 

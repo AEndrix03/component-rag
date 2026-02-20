@@ -147,7 +147,7 @@ from cpm_core.workspace import Workspace
 from cpm_core.events import EventBus
 from cpm_core.registry import FeatureRegistry
 
-workspace = Workspace(root=Path(".cpm"), config_path=Path(".cpm/config/cpm.toml"))
+workspace = Workspace(root=Path(".cpm"), config_path=Path(".cpm/config/config.toml"))
 events = EventBus()
 registry = FeatureRegistry()
 

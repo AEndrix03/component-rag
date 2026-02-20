@@ -22,7 +22,7 @@ cpm init
 **What it does:**
 
 - Creates `.cpm/` directory structure
-- Generates default `config/cpm.toml`
+- Generates default `config/config.toml`
 - Creates `config/embeddings.yml` template
 - Sets up workspace directories (packages, plugins, cache, logs, state)
 
@@ -53,7 +53,8 @@ Core commands:
   ...
 
 Plugin commands:
-  mcp:serve                      Start MCP server
+  plugin:list                    List loaded plugins
+  plugin:doctor                  Diagnose plugin issues
   ...
 
 Use group:name to disambiguate commands when needed.
@@ -82,7 +83,6 @@ help
 listing
 plugin:list
 plugin:doctor
-mcp:serve
 ```
 
 **Output (JSON):**
@@ -93,8 +93,7 @@ mcp:serve
   "help",
   "listing",
   "plugin:list",
-  "plugin:doctor",
-  "mcp:serve"
+  "plugin:doctor"
 ]
 ```
 
@@ -153,7 +152,7 @@ CPM Doctor Report
 
 Workspace Layout: ✓ OK
   Root: C:\Users\user\project\.cpm
-  Config: C:\Users\user\project\.cpm\config\cpm.toml
+  Config: C:\Users\user\project\.cpm\config\config.toml
   Embeddings: C:\Users\user\project\.cpm\config\embeddings.yml
 
 Plugins: ✓ 3 loaded
