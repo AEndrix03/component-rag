@@ -8,7 +8,7 @@ storage for package artifacts.
 * **S3-Compatible Storage:** Utilizes any S3-compatible object storage (e.g., AWS S3, MinIO) for storing package files.
 * **FastAPI Backend:** Built with FastAPI for high performance and easy API development.
 * **Lightweight Database:** Uses SQLite for metadata storage.
-* **CLI Management:** Simple command-line interface (`cpm`) for starting, stopping, and managing the registry server.
+* **CLI Management:** Simple command-line interface (`cpm-registry`) for starting, stopping, and managing the registry server.
 * **Environment-based Configuration:** Easy configuration through `.env` files.
 
 ## Installation
@@ -25,7 +25,7 @@ It is highly recommended to install this project within a Python virtual environ
     ```
 
 2. **Install the project in editable mode:**
-   This installs the project and its dependencies, making the `cpm` command available.
+   This installs the project and its dependencies, making the `cpm-registry` command available.
     ```bash
     pip install -e .
     ```
@@ -60,36 +60,36 @@ The registry server is configured using environment variables, typically managed
 
 ## Usage
 
-The `cpm` command-line tool is used to manage the registry server. Ensure your virtual environment is activated before
+The `cpm-registry` command-line tool is used to manage the registry server. Ensure your virtual environment is activated before
 running these commands.
 
 * **Start the server in the foreground:**
   ```bash
-  cpm start
+  cpm-registry start
   ```
   Press `CTRL+C` to stop the server.
 
 * **Start the server in the background (detached mode):**
   ```bash
-  cpm start --detach
+  cpm-registry start --detach
   ```
   This will run the server as a background process. Logs will be written to `.registry.log` and the process ID to
   `.registry.pid` in the project root.
 
 * **Stop the background server:**
   ```bash
-  cpm stop
+  cpm-registry stop
   ```
   This command reads the PID from `.registry.pid` and terminates the corresponding process.
 
 * **Check the server status:**
   ```bash
-  cpm status
+  cpm-registry status
   ```
   Reports whether the server is running or stopped.
 
 * **Specify a custom `.env` file:**
   If your `.env` file is not in the project root or has a different name, you can specify its path:
   ```bash
-  cpm start --env-file /path/to/my/.env
+  cpm-registry start --env-file /path/to/my/.env
   ```
