@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import textwrap
 from pathlib import Path
@@ -92,6 +93,25 @@ def test_global_help_posts_core_before_plugins(tmp_path: Path, capsys: pytest.Ca
     assert "Plugin commands" in content
     assert content.index("Core commands") < content.index("Plugin commands")
     assert "sample-command" in content
+
+
+def test_help_hides_benchmark_commands(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli_main(["help"], start_dir=tmp_path)
+    assert code == 0
+    content = capsys.readouterr().out
+    assert "benchmark" not in content
+    assert "benchmark-trend" not in content
+
+    code = cli_main(["benchmark", "--help"], start_dir=tmp_path)
+    assert code == 0
+
+
+def test_listing_hides_benchmark_commands(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli_main(["listing", "--format", "json"], start_dir=tmp_path)
+    assert code == 0
+    names = json.loads(capsys.readouterr().out)
+    assert "benchmark" not in names
+    assert "benchmark-trend" not in names
 
 
 def test_plugin_list_hides_builtins_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

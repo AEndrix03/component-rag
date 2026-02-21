@@ -14,6 +14,10 @@ from cpm_core.registry import AmbiguousFeatureError, FeatureNotFoundError
 from cpm_core.registry.entry import CPMRegistryEntry
 
 CLI_VERSION = "0.1.0"
+_HIDDEN_COMMANDS: set[tuple[str, str]] = {
+    ("cpm", "benchmark"),
+    ("cpm", "benchmark-trend"),
+}
 
 
 def main(
@@ -100,6 +104,7 @@ def _print_overview(
         app = CPMApp(start_dir=start_dir)
         app.bootstrap()
         entries = _ordered_entries(app.feature_registry.entries())
+    entries = [entry for entry in entries if _is_user_visible(entry)]
     if ambiguous is None:
         ambiguous = _ambiguous_names(entries)
 
@@ -118,7 +123,8 @@ def _print_overview(
 def _print_listing(entries: Iterable[CPMRegistryEntry], ambiguous: set[str], fmt: str) -> int:
     """Show the command listing."""
 
-    names = [_display_name(entry, ambiguous) for entry in entries]
+    visible_entries = [entry for entry in entries if _is_user_visible(entry)]
+    names = [_display_name(entry, ambiguous) for entry in visible_entries]
     if fmt == "json":
         print(json.dumps(names, indent=2))
         return 0
@@ -193,6 +199,10 @@ def _display_name(entry: CPMRegistryEntry, ambiguous: Iterable[str]) -> str:
     if entry.name in ambiguous:
         return entry.qualified_name
     return entry.name
+
+
+def _is_user_visible(entry: CPMRegistryEntry) -> bool:
+    return (entry.group, entry.name) not in _HIDDEN_COMMANDS
 
 
 def _command_description(entry: CPMRegistryEntry) -> str:
