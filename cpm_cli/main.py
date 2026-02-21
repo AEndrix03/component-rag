@@ -17,6 +17,8 @@ CLI_VERSION = "0.1.0"
 _HIDDEN_COMMANDS: set[tuple[str, str]] = {
     ("cpm", "benchmark"),
     ("cpm", "benchmark-trend"),
+    ("cpm", "default-builder"),
+    ("cpm", "native-retriever"),
 }
 
 

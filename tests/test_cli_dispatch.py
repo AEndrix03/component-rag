@@ -101,6 +101,8 @@ def test_help_hides_benchmark_commands(tmp_path: Path, capsys: pytest.CaptureFix
     content = capsys.readouterr().out
     assert "benchmark" not in content
     assert "benchmark-trend" not in content
+    assert "default-builder" not in content
+    assert "native-retriever" not in content
 
     code = cli_main(["benchmark", "--help"], start_dir=tmp_path)
     assert code == 0
@@ -112,6 +114,8 @@ def test_listing_hides_benchmark_commands(tmp_path: Path, capsys: pytest.Capture
     names = json.loads(capsys.readouterr().out)
     assert "benchmark" not in names
     assert "benchmark-trend" not in names
+    assert "default-builder" not in names
+    assert "native-retriever" not in names
 
 
 def test_plugin_list_hides_builtins_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
