@@ -47,15 +47,11 @@ cpm query \
   --query "authentication setup" \
   --registry registry.local/project
 
-# Hub/HTTP resolver source
-cpm query \
-  --query "authentication setup" \
-  --registry "http://127.0.0.1:8786/v1/resolve?source=oci://registry.local/project/my-docs@1.0.0"
 ```
 
 Notes:
-- `--registry` is a lazy source shortcut (`oci://`, `http(s)://`, `dir://`, or OCI repository base).
-- With `query`, `--registry http(s)://host[:port][/repo]` + `--packet` is treated as OCI base (`oci://host[:port][/repo]/<packet>`), unless it is an explicit hub endpoint (`/v1/resolve` or query `source=`/`uri=`).
+- `--source` and `--registry` support OCI only.
+- `--registry` accepts `oci://...` or OCI repository base (`registry.local/project`) used with `--packet`.
 - `--embed` overrides query-time embedding model.
 - If `--embed` is omitted in lazy mode, CPM defaults to `text-embedding-3-small`.
 
@@ -79,14 +75,14 @@ cpm benchmark-trend --format json
 
 ```bash
 cpm publish --from-dir ./dist/demo/1.0.0 --registry registry.local/project
-cpm publish --from-dir ./demo --registry http://localhost:5000
+cpm publish --from-dir ./demo --registry registry.local/project
 cpm install demo@1.0.0 --registry registry.local/project
 cpm query --packet demo --query "authentication setup"
 ```
 
 Notes:
 - `publish --from-dir` accepts direct packet dir, or packet name shorthand when a unique `./dist/<name>/<version>` exists.
-- `publish --registry` accepts OCI repository or `http(s)://host[:port][/path]` (normalized internally).
+- `publish --registry` accepts OCI repository references only.
 
 ## Policy and Hub
 

@@ -34,7 +34,6 @@ If you just cloned CPM and want to run it now:
 ### I want to run and operate CPM in production/CI
 - `docs/operations/workspace-and-config.md`
 - `docs/operations/testing-and-quality.md`
-- `docs/operations/registry-service.md`
 
 ### I want to contribute code
 - `docs/contributing/implementation-patterns.md`

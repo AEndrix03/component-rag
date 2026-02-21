@@ -12,7 +12,7 @@ Distribuire packet versionati via registry OCI e reinstallarli in workspace dive
 ## Fallback publish
 - `--from-dir` puo puntare direttamente alla directory packet (`dist/<name>/<version>`).
 - Se `--from-dir` non esiste, CPM prova fallback a `dist/<name>/<version>` quando esiste una sola versione.
-- `--registry` accetta repository OCI (`registry.local/project`) e URL `http(s)://host[:port][/path]`, normalizzato in ref OCI.
+- `--registry` accetta solo riferimenti OCI (`oci://...` o `registry.local/project`).
 - Errori OCI (es. `oras` mancante) vengono riportati come errore controllato senza traceback.
 
 ## Variante no-embed

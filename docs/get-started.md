@@ -52,7 +52,7 @@ cpm query --packet my-docs --query "auth" --indexer hybrid-rrf
 
 # OCI distribution
 cpm publish --from-dir ./dist/my-docs/1.0.0 --registry registry.local/project
-cpm publish --from-dir ./my-docs --registry http://localhost:5000
+cpm publish --from-dir ./my-docs --registry registry.local/project
 cpm install my-docs@1.0.0 --registry registry.local/project
 
 # Repro/audit
@@ -67,6 +67,7 @@ cpm benchmark --packet my-docs --query "auth" --runs 5
 - For lazy registry query, set `--embed <model>` to force model selection (default: `text-embedding-3-small`).
 - If packet is not found: run `cpm lookup` and verify packet/version.
 - For `publish`, if `--from-dir` is a packet name, CPM resolves `./dist/<name>/<version>` only when one version exists.
+- `query/install/publish` registries are OCI-only (`oci://...` or `<registry>/<repo>`).
 - If OCI policy fails: check `.cpm/policy.yml` and optional `[hub]` settings in `.cpm/config/config.toml`.
 - If OCI query/publish fails with `basic credential not found`: your registry requires auth (`docker login <registry-host>`) or set `[oci].username/password` in `.cpm/config/config.toml`.
 - For local dev registries without attestations, relax OCI verification in `.cpm/config/config.toml` with `[oci] strict_verify = false` (optionally also disable `require_signature/sbom/provenance`).

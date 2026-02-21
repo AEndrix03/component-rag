@@ -27,7 +27,6 @@ Use this as the top-level map of CPM docs.
 ## Operations and CI
 - `docs/operations/workspace-and-config.md`
 - `docs/operations/testing-and-quality.md`
-- `docs/operations/registry-service.md`
 
 ## Contributing guides
 - `docs/contributing/implementation-patterns.md`
