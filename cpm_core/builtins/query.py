@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 import os
-import urllib.parse
 from argparse import ArgumentParser
 from datetime import UTC, datetime
 from pathlib import Path
@@ -383,10 +382,10 @@ class QueryCommand(_WorkspaceAwareCommand):
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--workspace-dir", default=".", help="Workspace root directory")
         parser.add_argument("--packet", help="Packet name or path")
-        parser.add_argument("--source", help="Source URI (dir://, oci://, https://...)")
+        parser.add_argument("--source", help="Source URI (oci://...)")
         parser.add_argument(
             "--registry",
-            help="Lazy source shortcut: oci://..., https://..., dir://..., or OCI repository base (used with --packet)",
+            help="Lazy OCI source shortcut: oci://... or OCI repository base (used with --packet)",
         )
         parser.add_argument("--query", required=True, help="Query text")
         parser.add_argument("--as-of", help="Historical snapshot timestamp (ISO or YYYY-MM-DD)")
@@ -872,6 +871,8 @@ class QueryCommand(_WorkspaceAwareCommand):
     @staticmethod
     def _resolve_source_uri(*, source_uri: str, registry: str, packet: str) -> str:
         if source_uri:
+            if not source_uri.startswith("oci://"):
+                raise ValueError("only OCI sources are supported; use oci://<repository>/<packet>@<version>")
             return source_uri
         if not registry:
             return ""
@@ -880,27 +881,13 @@ class QueryCommand(_WorkspaceAwareCommand):
             if packet and value.startswith("oci://") and "@" not in value.split("/")[-1] and ":" not in value.split("/")[-1]:
                 return f"{value.rstrip('/')}/{packet}"
             return value
-        if value.startswith(("https://", "http://")):
-            if packet and not QueryCommand._looks_like_hub_endpoint(value):
-                parsed = urllib.parse.urlparse(value)
-                repository = "/".join(segment for segment in (parsed.netloc, parsed.path.strip("/")) if segment)
-                if repository:
-                    return f"oci://{repository.rstrip('/')}/{packet}"
-            return value
-        if value.startswith("dir://"):
-            return value
+        if value.startswith(("http://", "https://", "dir://")):
+            raise ValueError("only OCI registry references are supported; use oci://... or <registry>/<repo>")
         if not packet:
             raise ValueError(
                 "registry base without URI scheme requires --packet (example: --packet demo@1.0.0 --registry harbor.local/project)"
             )
         return f"oci://{value.rstrip('/')}/{packet}"
-
-    @staticmethod
-    def _looks_like_hub_endpoint(registry: str) -> bool:
-        parsed = urllib.parse.urlparse(registry)
-        query = urllib.parse.parse_qs(parsed.query)
-        path = parsed.path.rstrip("/")
-        return path.endswith("/v1/resolve") or "source" in query or "uri" in query
 
     def _write_replay_log(
         self,

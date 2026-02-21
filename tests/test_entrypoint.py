@@ -222,11 +222,16 @@ def test_query_command_supports_source_uri(
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
     query_builtin = importlib.import_module("cpm_core.builtins.query")
-    source_dir = tmp_path / "source-packet"
-    source_dir.mkdir(parents=True, exist_ok=True)
-    (source_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    cached_packet = tmp_path / ".cpm" / "cache" / "objects" / "fake"
+    cached_packet.mkdir(parents=True, exist_ok=True)
 
     captured: dict[str, object] = {}
+
+    def _fake_resolve_and_fetch(self, uri: str):
+        return (
+            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
+            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
+        )
 
     def _fake_retrieve(self, identifier: str, **kwargs):
         captured.update(kwargs)
@@ -238,6 +243,7 @@ def test_query_command_supports_source_uri(
             "results": [],
         }
 
+    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
     monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
     code = cli_main.main(
         [
@@ -245,7 +251,7 @@ def test_query_command_supports_source_uri(
             "--workspace-dir",
             str(tmp_path),
             "--source",
-            f"dir://{source_dir}",
+            "oci://registry.local/project/demo@1.0.0",
             "--query",
             "auth",
         ],
@@ -254,7 +260,7 @@ def test_query_command_supports_source_uri(
     out = capsys.readouterr().out
 
     assert code == 0
-    assert "source=dir://" in out
+    assert "source=oci://" in out
     packet_arg = str(captured.get("packet") or "")
     assert packet_arg
     assert Path(packet_arg).exists()
@@ -266,11 +272,16 @@ def test_query_command_supports_registry_shortcut_and_embed_override(
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
     query_builtin = importlib.import_module("cpm_core.builtins.query")
-    source_dir = tmp_path / "source-packet"
-    source_dir.mkdir(parents=True, exist_ok=True)
-    (source_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    cached_packet = tmp_path / ".cpm" / "cache" / "objects" / "fake"
+    cached_packet.mkdir(parents=True, exist_ok=True)
 
     captured: dict[str, object] = {}
+
+    def _fake_resolve_and_fetch(self, uri: str):
+        return (
+            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
+            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
+        )
 
     def _fake_retrieve(self, identifier: str, **kwargs):
         captured.update(kwargs)
@@ -282,6 +293,7 @@ def test_query_command_supports_registry_shortcut_and_embed_override(
             "results": [],
         }
 
+    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
     monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
     code = cli_main.main(
         [
@@ -289,7 +301,7 @@ def test_query_command_supports_registry_shortcut_and_embed_override(
             "--workspace-dir",
             str(tmp_path),
             "--registry",
-            f"dir://{source_dir}",
+            "oci://registry.local/project/demo@1.0.0",
             "--query",
             "auth",
             "--embed",
@@ -300,7 +312,7 @@ def test_query_command_supports_registry_shortcut_and_embed_override(
     out = capsys.readouterr().out
 
     assert code == 0
-    assert "source=dir://" in out
+    assert "source=oci://" in out
     assert captured.get("selected_model") == "mini-model"
 
 
@@ -309,11 +321,16 @@ def test_query_command_registry_shortcut_without_embed_keeps_manifest_model(
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
     query_builtin = importlib.import_module("cpm_core.builtins.query")
-    source_dir = tmp_path / "source-packet"
-    source_dir.mkdir(parents=True, exist_ok=True)
-    (source_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    cached_packet = tmp_path / ".cpm" / "cache" / "objects" / "fake"
+    cached_packet.mkdir(parents=True, exist_ok=True)
 
     captured: dict[str, object] = {}
+
+    def _fake_resolve_and_fetch(self, uri: str):
+        return (
+            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
+            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
+        )
 
     def _fake_retrieve(self, identifier: str, **kwargs):
         captured.update(kwargs)
@@ -325,6 +342,7 @@ def test_query_command_registry_shortcut_without_embed_keeps_manifest_model(
             "results": [],
         }
 
+    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
     monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
     code = cli_main.main(
         [
@@ -332,7 +350,7 @@ def test_query_command_registry_shortcut_without_embed_keeps_manifest_model(
             "--workspace-dir",
             str(tmp_path),
             "--registry",
-            f"dir://{source_dir}",
+            "oci://registry.local/project/demo@1.0.0",
             "--query",
             "auth",
         ],
@@ -341,7 +359,7 @@ def test_query_command_registry_shortcut_without_embed_keeps_manifest_model(
     out = capsys.readouterr().out
 
     assert code == 0
-    assert "source=dir://" in out
+    assert "source=oci://" in out
     assert captured.get("selected_model") is None
 
 
@@ -386,29 +404,8 @@ def test_query_command_supports_registry_base_with_packet(
     assert resolved["uri"] == "oci://registry.local/project/demo@1.0.0"
 
 
-def test_query_command_supports_http_registry_base_with_packet(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_query_command_rejects_http_registry_base_with_packet(tmp_path: Path) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
-    query_builtin = importlib.import_module("cpm_core.builtins.query")
-    resolved: dict[str, str] = {}
-    cached_packet = tmp_path / ".cpm" / "cache" / "objects" / "fake"
-    cached_packet.mkdir(parents=True, exist_ok=True)
-
-    def _fake_resolve_and_fetch(self, uri: str):
-        resolved["uri"] = uri
-        return (
-            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
-            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
-        )
-
-    def _fake_retrieve(self, identifier: str, **kwargs):
-        del self, identifier
-        return {"ok": True, "packet": kwargs.get("packet"), "results": []}
-
-    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
-    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
-    monkeypatch.setattr(query_builtin.QueryCommand, "_write_replay_log", lambda self, **kwargs: None)
     code = cli_main.main(
         [
             "query",
@@ -417,39 +414,19 @@ def test_query_command_supports_http_registry_base_with_packet(
             "--packet",
             "demo@1.0.0",
             "--registry",
-            "http://localhost:5000",
+            "registry.local/project",
             "--query",
             "auth",
         ],
         start_dir=tmp_path,
     )
-    assert code == 0
-    assert resolved["uri"] == "oci://localhost:5000/demo@1.0.0"
+    assert code == 1
 
 
-def test_query_command_keeps_hub_registry_endpoint(
-    monkeypatch, tmp_path: Path
+def test_query_command_rejects_http_hub_registry_endpoint(
+    tmp_path: Path
 ) -> None:
     cli_main = importlib.import_module("cpm_cli.main")
-    query_builtin = importlib.import_module("cpm_core.builtins.query")
-    resolved: dict[str, str] = {}
-    cached_packet = tmp_path / ".cpm" / "cache" / "objects" / "fake"
-    cached_packet.mkdir(parents=True, exist_ok=True)
-
-    def _fake_resolve_and_fetch(self, uri: str):
-        resolved["uri"] = uri
-        return (
-            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
-            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
-        )
-
-    def _fake_retrieve(self, identifier: str, **kwargs):
-        del self, identifier
-        return {"ok": True, "packet": kwargs.get("packet"), "results": []}
-
-    monkeypatch.setattr(query_builtin.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
-    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_retrieve)
-    monkeypatch.setattr(query_builtin.QueryCommand, "_write_replay_log", lambda self, **kwargs: None)
     url = "http://127.0.0.1:8786/v1/resolve?source=oci://registry.local/project/demo@1.0.0"
     code = cli_main.main(
         [
@@ -465,8 +442,7 @@ def test_query_command_keeps_hub_registry_endpoint(
         ],
         start_dir=tmp_path,
     )
-    assert code == 0
-    assert resolved["uri"] == url
+    assert code == 1
 
 
 def test_query_command_prints_auth_hint_for_oci_registry(
@@ -488,7 +464,7 @@ def test_query_command_prints_auth_hint_for_oci_registry(
             "--packet",
             "demo@1.0.0",
             "--registry",
-            "http://localhost:5000",
+            "registry.local/project",
             "--query",
             "auth",
         ],

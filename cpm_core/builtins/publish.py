@@ -8,7 +8,6 @@ import tomllib
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from cpm_core.api import cpmcommand
 from cpm_core.oci import OciClient, OciClientConfig, OciError, build_artifact_spec, build_oci_layout, package_ref_for
@@ -41,7 +40,11 @@ class PublishCommand(_WorkspaceAwareCommand):
             return 1
 
         config = _load_oci_config(workspace_root)
-        repository = _normalize_repository(str(getattr(argv, "registry", "") or config.get("repository") or ""))
+        try:
+            repository = _normalize_repository(str(getattr(argv, "registry", "") or config.get("repository") or ""))
+        except ValueError as exc:
+            print(f"[cpm:publish] {exc}")
+            return 1
         if not repository:
             print("[cpm:publish] missing OCI repository. Set --registry or [oci].repository in config.toml")
             return 1
@@ -110,13 +113,7 @@ def _normalize_repository(value: str) -> str:
     if repository.startswith("oci://"):
         return repository[len("oci://") :].strip("/")
     if repository.startswith(("http://", "https://")):
-        parsed = urlsplit(repository)
-        host = parsed.netloc.strip("/")
-        path = parsed.path.strip("/")
-        if host and path:
-            return f"{host}/{path}"
-        if host:
-            return host
+        raise ValueError("HTTP(S) registry URLs are not supported; use OCI reference '<registry>/<repository>'")
     return repository
 
 

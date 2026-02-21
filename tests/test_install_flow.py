@@ -15,6 +15,10 @@ def _write_workspace_config(workspace_root: Path) -> None:
         """[oci]
 repository = "registry.local/project"
 allowlist_domains = ["registry.local"]
+strict_verify = false
+require_signature = false
+require_sbom = false
+require_provenance = false
 """,
         encoding="utf-8",
     )
@@ -96,6 +100,10 @@ def test_install_remote_only_provider(monkeypatch, tmp_path: Path) -> None:
         def resolve(self, ref: str) -> str:
             return "sha256:" + ("a" * 64)
 
+        def discover_referrers(self, subject_ref: str):
+            del subject_ref
+            return []
+
         def pull(self, ref: str, output_dir: Path):
             shutil.copytree(packet_artifact, output_dir, dirs_exist_ok=True)
             files = tuple(path for path in output_dir.rglob("*") if path.is_file())
@@ -132,6 +140,10 @@ def test_install_provider_with_model_artifact(monkeypatch, tmp_path: Path) -> No
             if "models/" in ref:
                 return "sha256:" + ("b" * 64)
             return "sha256:" + ("a" * 64)
+
+        def discover_referrers(self, subject_ref: str):
+            del subject_ref
+            return []
 
         def pull(self, ref: str, output_dir: Path):
             if "models/" in ref:
@@ -183,6 +195,10 @@ def test_install_no_embed_skips_model_resolution(monkeypatch, tmp_path: Path) ->
         def resolve(self, ref: str) -> str:
             return "sha256:" + ("a" * 64)
 
+        def discover_referrers(self, subject_ref: str):
+            del subject_ref
+            return []
+
         def pull(self, ref: str, output_dir: Path):
             shutil.copytree(packet_artifact, output_dir, dirs_exist_ok=True)
             files = tuple(path for path in output_dir.rglob("*") if path.is_file())
@@ -203,3 +219,13 @@ def test_install_no_embed_skips_model_resolution(monkeypatch, tmp_path: Path) ->
     lock = json.loads((workspace_root / "state" / "install" / "demo.lock.json").read_text(encoding="utf-8"))
     assert lock["no_embed"] is True
     assert lock["selected_model"] is None
+
+
+def test_install_rejects_http_registry(tmp_path: Path, capfd) -> None:
+    code = cli_main(
+        ["install", "demo@1.0.0", "--registry", "http://localhost:5000"],
+        start_dir=tmp_path,
+    )
+    out = capfd.readouterr().out
+    assert code == 1
+    assert "HTTP(S) registry URLs are not supported" in out

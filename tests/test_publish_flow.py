@@ -82,30 +82,17 @@ def test_publish_no_embed_excludes_vectors(monkeypatch, tmp_path: Path) -> None:
     assert not any("index.faiss" in item for item in files)
 
 
-def test_publish_resolves_dist_fallback_and_normalizes_http_registry(monkeypatch, tmp_path: Path) -> None:
+def test_publish_rejects_http_registry(monkeypatch, tmp_path: Path, capfd) -> None:
     workspace_root = tmp_path / ".cpm"
     monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
     _create_packet_dir(tmp_path / "dist")
-    captured: dict[str, object] = {}
-
-    class _FakeOciClient:
-        def __init__(self, config):
-            captured["config"] = config
-
-        def push(self, ref, spec):
-            captured["ref"] = ref
-            captured["files"] = [str(path) for path in spec.files]
-            return type("PushResult", (), {"ref": ref, "digest": "sha256:" + ("d" * 64)})()
-
-    import cpm_core.builtins.publish as publish_mod
-
-    monkeypatch.setattr(publish_mod, "OciClient", _FakeOciClient)
     code = cli_main(
         ["publish", "--from-dir", "./demo", "--registry", "http://localhost:5000"],
         start_dir=tmp_path,
     )
-    assert code == 0
-    assert str(captured["ref"]) == "localhost:5000/demo:1.0.0"
+    out = capfd.readouterr().out
+    assert code == 1
+    assert "HTTP(S) registry URLs are not supported" in out
 
 
 def test_publish_resolves_existing_container_dir(monkeypatch, tmp_path: Path) -> None:

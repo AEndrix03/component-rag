@@ -9,6 +9,7 @@ import cpm_core.builtins.benchmark as benchmark_mod
 import cpm_core.builtins.query as query_mod
 from cpm_cli.main import main as cli_main
 from cpm_core.registry.entry import CPMRegistryEntry
+from cpm_core.sources import LocalPacket, PacketReference
 
 
 def test_query_denies_when_hub_policy_denies(
@@ -30,22 +31,28 @@ def test_query_denies_when_hub_policy_denies(
         ),
         encoding="utf-8",
     )
-    source_dir = tmp_path / "source-packet"
-    source_dir.mkdir(parents=True, exist_ok=True)
-    (source_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    cached_packet = workspace_root / "cache" / "objects" / "fake"
+    cached_packet.mkdir(parents=True, exist_ok=True)
+
+    def _fake_resolve_and_fetch(self, uri: str):
+        return (
+            PacketReference(uri=uri, resolved_uri=uri, digest="sha256:" + ("a" * 64)),
+            LocalPacket(path=cached_packet, cache_key="fake", cached=False),
+        )
 
     monkeypatch.setattr(
         query_mod.HubClient,
         "evaluate_policy",
         lambda self, context, policy: {"allow": False, "decision": "deny", "reason": "hub_blocked"},
     )
+    monkeypatch.setattr(query_mod.SourceResolver, "resolve_and_fetch", _fake_resolve_and_fetch)
     code = cli_main(
         [
             "query",
             "--workspace-dir",
             str(tmp_path),
             "--source",
-            f"dir://{source_dir}",
+            "oci://registry.local/project/demo@1.0.0",
             "--query",
             "auth",
         ],

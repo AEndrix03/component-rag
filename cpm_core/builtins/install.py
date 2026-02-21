@@ -48,7 +48,11 @@ class InstallCommand(_WorkspaceAwareCommand):
             return 1
 
         config = _load_oci_config(workspace_root)
-        repository = str(getattr(argv, "registry", "") or config.get("repository") or "").strip()
+        try:
+            repository = _normalize_repository(str(getattr(argv, "registry", "") or config.get("repository") or "").strip())
+        except ValueError as exc:
+            print(f"[cpm:install] {exc}")
+            return 1
         if not repository:
             print("[cpm:install] missing OCI repository. Set --registry or [oci].repository in config.toml")
             return 1
@@ -356,3 +360,14 @@ def _policy_payload(policy: Any) -> dict[str, Any]:
         "min_trust_score": float(getattr(policy, "min_trust_score", 0.0)),
         "max_tokens": int(getattr(policy, "max_tokens", 6000)),
     }
+
+
+def _normalize_repository(value: str) -> str:
+    repository = value.strip().rstrip("/")
+    if not repository:
+        return ""
+    if repository.startswith("oci://"):
+        return repository[len("oci://") :].strip("/")
+    if repository.startswith(("http://", "https://")):
+        raise ValueError("HTTP(S) registry URLs are not supported; use OCI reference '<registry>/<repository>'")
+    return repository

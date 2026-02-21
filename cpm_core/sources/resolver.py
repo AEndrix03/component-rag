@@ -1,12 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
-import tarfile
 import tempfile
 import tomllib
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import asdict
 from pathlib import Path
 from typing import Protocol
@@ -14,7 +10,7 @@ from typing import Protocol
 from cpm_core.oci import OciClient, OciClientConfig
 from cpm_core.oci.security import evaluate_trust_report
 
-from .cache import SourceCache, directory_digest
+from .cache import SourceCache
 from .models import LocalPacket, PacketReference, UpdateInfo
 
 
@@ -38,33 +34,6 @@ def _load_oci_config(workspace_root: Path) -> dict[str, object]:
         return {}
     section = payload.get("oci")
     return section if isinstance(section, dict) else {}
-
-
-class DirSource:
-    def can_handle(self, uri: str) -> bool:
-        return uri.startswith("dir://") or Path(uri).exists()
-
-    def resolve(self, uri: str) -> PacketReference:
-        if uri.startswith("dir://"):
-            target = Path(uri[len("dir://") :])
-        else:
-            target = Path(uri)
-        if not target.exists() or not target.is_dir():
-            raise FileNotFoundError(f"source directory not found: {target}")
-        digest = directory_digest(target.resolve())
-        return PacketReference(
-            uri=uri,
-            resolved_uri=str(target.resolve()),
-            digest=digest,
-            metadata={"source": "dir"},
-        )
-
-    def fetch(self, ref: PacketReference, cache: SourceCache) -> LocalPacket:
-        return cache.materialize_directory(Path(ref.resolved_uri), digest=ref.digest)
-
-    def check_updates(self, ref: PacketReference) -> UpdateInfo:
-        current = directory_digest(Path(ref.resolved_uri))
-        return UpdateInfo(has_update=current != ref.digest, latest_digest=current)
 
 
 class OciSource:
@@ -156,100 +125,15 @@ class OciSource:
         return UpdateInfo(has_update=latest != ref.digest, latest_digest=latest)
 
 
-class HubSource:
-    def __init__(self, workspace_root: Path) -> None:
-        self.workspace_root = workspace_root.resolve()
-        self._oci = OciSource(workspace_root)
-        self._dir = DirSource()
-
-    def can_handle(self, uri: str) -> bool:
-        return uri.startswith("https://") or uri.startswith("http://")
-
-    def resolve(self, uri: str) -> PacketReference:
-        parsed = urllib.parse.urlparse(uri)
-        query = urllib.parse.parse_qs(parsed.query)
-        nested_uri = (query.get("uri") or [None])[0]
-        endpoint = uri
-        if not nested_uri and parsed.scheme in {"http", "https"}:
-            endpoint = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/v1/resolve", "", "", ""))
-            candidate = (query.get("source") or [None])[0]
-            if candidate:
-                nested_uri = candidate
-        if nested_uri:
-            payload = json.dumps({"uri": nested_uri}).encode("utf-8")
-            request = urllib.request.Request(
-                endpoint,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=20) as response:  # nosec - controlled in tests/config
-                body = response.read()
-            result = json.loads(body.decode("utf-8"))
-            resolved_uri = str(result.get("uri") or nested_uri)
-            digest = str(result.get("digest") or "")
-            if not digest:
-                raise ValueError("hub resolve response missing digest")
-            return PacketReference(
-                uri=uri,
-                resolved_uri=resolved_uri,
-                digest=digest,
-                metadata={
-                    "source": "hub",
-                    "mode": "resolve",
-                    "refs": result.get("refs") if isinstance(result.get("refs"), list) else [],
-                    "trust": result.get("trust") if isinstance(result.get("trust"), dict) else {},
-                },
-            )
-        return PacketReference(
-            uri=uri,
-            resolved_uri=uri,
-            digest=uri,
-            metadata={"source": "hub", "mode": "direct"},
-        )
-
-    def fetch(self, ref: PacketReference, cache: SourceCache) -> LocalPacket:
-        resolved = ref.resolved_uri
-        if resolved.startswith("oci://"):
-            return self._oci.fetch(self._oci.resolve(resolved), cache)
-        if resolved.startswith("dir://") or Path(resolved).exists():
-            return self._dir.fetch(self._dir.resolve(resolved), cache)
-        with tempfile.TemporaryDirectory(prefix="cpm-source-http-") as tmp:
-            archive_path = Path(tmp) / "artifact.tar.gz"
-            try:
-                urllib.request.urlretrieve(resolved, archive_path)  # nosec - explicit user-provided URL
-            except urllib.error.URLError as exc:
-                raise RuntimeError(f"unable to download source archive: {exc}") from exc
-            extract_dir = Path(tmp) / "payload"
-            extract_dir.mkdir(parents=True, exist_ok=True)
-            with tarfile.open(archive_path, mode="r:gz") as tar:
-                tar.extractall(extract_dir)
-            entries = [item for item in extract_dir.iterdir() if item.is_dir()]
-            packet_dir = entries[0] if len(entries) == 1 else extract_dir
-            return cache.materialize_directory(packet_dir, digest=ref.digest)
-
-    def check_updates(self, ref: PacketReference) -> UpdateInfo:
-        return UpdateInfo(has_update=False, detail="hub source update checks are not implemented")
-
-
 class SourceResolver:
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root.resolve()
         self.cache = SourceCache(self.workspace_root)
-        self._sources: list[CPMSource] = [
-            DirSource(),
-            OciSource(self.workspace_root),
-            HubSource(self.workspace_root),
-        ]
+        self._source: CPMSource = OciSource(self.workspace_root)
 
     def resolve_and_fetch(self, uri: str) -> tuple[PacketReference, LocalPacket]:
-        source = self._select_source(uri)
-        reference = source.resolve(uri)
-        packet = source.fetch(reference, self.cache)
+        if not self._source.can_handle(uri):
+            raise ValueError("unsupported source URI: only oci:// is supported")
+        reference = self._source.resolve(uri)
+        packet = self._source.fetch(reference, self.cache)
         return reference, packet
-
-    def _select_source(self, uri: str) -> CPMSource:
-        for source in self._sources:
-            if source.can_handle(uri):
-                return source
-        raise ValueError(f"unsupported source URI: {uri}")
