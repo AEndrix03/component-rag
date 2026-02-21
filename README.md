@@ -117,6 +117,7 @@ Deep dives:
 - `docs/components/oci-publish-install.md`
 - `docs/operations/workspace-and-config.md`
 - `docs/operations/testing-and-quality.md`
+- `docs/plans/mcp-tooling-report.md`
 
 ## Development
 

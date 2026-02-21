@@ -51,3 +51,4 @@ Implementation blueprints for context supply-chain evolution:
 - `docs/plans/phase-F-policy-engine.md`
 - `docs/plans/phase-G-time-travel-replay.md`
 - `docs/plans/phase-H-drift-diff.md`
+- `docs/plans/mcp-tooling-report.md`
