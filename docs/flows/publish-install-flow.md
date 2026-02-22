@@ -16,8 +16,16 @@ Distribuire packet versionati via registry OCI e reinstallarli in workspace dive
 - Errori OCI (es. `oras` mancante) vengono riportati come errore controllato senza traceback.
 
 ## Variante no-embed
-- publish con `--no-embed` per pacchetti leggeri,
+- publish con `--no-embed` (legacy) o `--no-embeddings` per pacchetti leggeri.
+- modalita `--minimal` per payload minimo (no docs, no embeddings).
+- toggle espliciti `--with-docs/--no-docs` e `--with-embeddings/--no-embeddings`.
 - install puo mantenere no-embed oppure selezionare modello/provider compatibile.
+
+## Lookup remoto
+- `cpm lookup --source-uri oci://...` usa percorso low-token:
+  1. fetch manifest OCI
+  2. fetch blob metadata (`packet.manifest.json`)
+- il payload non viene scaricato per il solo lookup.
 
 ## Tracciabilita
 Digest OCI + install lock permettono audit e rollback controllato.

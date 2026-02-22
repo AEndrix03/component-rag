@@ -2,7 +2,13 @@
 
 ## Publish
 `PublishCommand` costruisce layout OCI (`build_oci_layout`) e invia artifact con `OciClient.push`.
-Supporta `--no-embed` per distribuire packet senza vettori/FAISS.
+Supporta:
+- `--minimal` (payload minimo),
+- `--with-docs/--no-docs`,
+- `--with-embeddings/--no-embeddings`,
+- `--no-embed` (compat legacy).
+
+Il metadata layer `packet.manifest.json` usa schema `cpm.packet.metadata` v`1.0` e media type `application/vnd.cpm.packet.manifest.v1+json`.
 
 ## Install
 `InstallCommand`:
@@ -29,3 +35,6 @@ Supporta `--no-embed` per distribuire packet senza vettori/FAISS.
 
 ## Operativita
 Configurare `[oci]` in config (repository, retry, timeout, credenziali) prima di publish/install.
+
+## Lookup metadata-first
+`SourceResolver.lookup_metadata` risolve digest, scarica manifest OCI e blob metadata senza pull completo del payload, con cache digest-based.

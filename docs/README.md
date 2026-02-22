@@ -18,6 +18,8 @@ If you just cloned CPM and want to run it now:
 - `docs/flows/build-flow.md`
 - `docs/flows/query-flow.md`
 - `docs/flows/publish-install-flow.md`
+- `docs/cli/publish.md`
+- `docs/mcp/lookup.md`
 
 ### I want to understand architecture
 - `docs/architecture/system-overview.md`
@@ -30,6 +32,10 @@ If you just cloned CPM and want to run it now:
 - `docs/components/packet-format-and-lockfile.md`
 - `docs/components/oci-publish-install.md`
 - `docs/components/plugin-system.md`
+- `docs/oci/overview.md`
+- `docs/oci/packet-metadata.md`
+- `docs/oci/catalog.md`
+- `docs/oci/compat.md`
 
 ### I want to run and operate CPM in production/CI
 - `docs/operations/workspace-and-config.md`
