@@ -207,7 +207,7 @@ dist/<name>/<version>/
   vectors.f16.bin          # se embedding ok
   faiss/
     index.faiss            # se embedding ok
-  cpm.lock.json            # nome default lockfile
+  packet.lock.json         # nome default lockfile
 ```
 
 Archivio opzionale:
@@ -271,7 +271,7 @@ Campi notevoli:
 - `files.vectors` e `files.index` valorizzati solo se embedding riuscito
 - `checksums` contiene hash sha256 dei file presenti
 
-## 13. Lockfile (`cpm.lock.json`)
+## 13. Lockfile (`packet.lock.json`)
 
 Struttura:
 1. `lockfileVersion`
@@ -316,7 +316,7 @@ cpm build run \
   --destination ./dist \
   --name my-docs \
   --version 1.0.0 \
-  --lockfile cpm.lock.json
+  --lockfile packet.lock.json
 ```
 
 Solo lock:
@@ -337,12 +337,110 @@ Re-embed da packet esistente:
 cpm build embed --source ./dist/my-docs/1.0.0 --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
-## 16. Conclusione
+## 16. Publish su OCI e creazione artifact immagine
+
+Il publish e` implementato da `PublishCommand` (`cpm_core/builtins/publish.py`) e usa ORAS tramite `OciClient`.
+
+Comando:
+
+```bash
+cpm publish --from-dir ./dist/my-docs/1.0.0 --registry harbor.local/project
+```
+
+Opzioni chiave:
+- `--from-dir`: directory packet da pubblicare (obbligatoria)
+- `--registry`: repository OCI (`<registry>/<repository>`)
+- `--insecure`: abilita TLS insecure
+- `--no-embed`: esclude `vectors.f16.bin` e `faiss/index.faiss`
+
+### 16.1 Risoluzione packet directory
+
+`_resolve_packet_dir(...)` accetta:
+1. path diretto a packet dir con `manifest.json`,
+2. path parent con una sola sottodirectory versione valida,
+3. shorthand `--from-dir <packet-name>` risolto in `dist/<packet-name>/<single-version>/`.
+
+Se il path e` ambiguo o manca `manifest.json`, publish fallisce.
+
+### 16.2 Risoluzione repository OCI
+
+`_normalize_repository(...)`:
+- accetta `oci://...` e lo converte in reference puro,
+- rifiuta `http://` o `https://`,
+- usa fallback da `.cpm/config/config.toml` se `--registry` non e` passato.
+
+### 16.3 Come viene creata l'"immagine" OCI
+
+Il publish non crea una Docker image runnable (nessun Dockerfile/entrypoint).
+Viene creato un OCI artifact (pacchetto dati) composto da file/layer pubblicati con `oras push`.
+
+Pipeline:
+1. crea una staging dir temporanea (`tempfile.TemporaryDirectory`)
+2. `build_oci_layout(packet_dir, staging_dir, include_embeddings=...)`
+3. costruisce reference target con `package_ref_for(name, version, repository)`:
+   - formato: `<repository>/<packet_name>:<packet_version>`
+4. costruisce artifact spec (`build_artifact_spec`)
+5. esegue push via ORAS (`OciClient.push`)
+
+### 16.4 Contenuto staging OCI
+
+`build_oci_layout(...)` prepara:
+- `staging/payload/` con file packet
+- `staging/packet.manifest.json` (manifest OCI CPM)
+- opzionale `staging/packet.lock.json` se presente nel packet sorgente
+
+File payload base sempre inclusi:
+1. `cpm.yml`
+2. `manifest.json`
+3. `docs.jsonl`
+
+File embedding inclusi solo se `include_embeddings=True`:
+1. `vectors.f16.bin`
+2. `faiss/index.faiss`
+
+`packet.manifest.json` include:
+- `schema: "cpm-oci/v1"`
+- `packet: {name, version}`
+- `source_manifest` (manifest packet originale completo)
+- `payload_root: "payload"`
+- `options.include_embeddings`
+
+Media type custom assegnati:
+- `packet.manifest.json` -> `application/vnd.cpm.packet.manifest.v1+json`
+- `packet.lock.json` -> `application/vnd.cpm.packet.lock.v1+json`
+
+Nota:
+- il layer media type `application/vnd.cpm.packet.layer.v1.tar+gzip` e` definito come costante ma il push corrente usa file artifact ORAS (non tar layer unico esplicito).
+
+### 16.5 Push ORAS effettivo
+
+`OciClient.push(...)`:
+1. valida allowlist domini (`assert_allowlisted`)
+2. costruisce comando `oras push <ref> <path[:mediaType]>...`
+3. esegue comando nella root comune dei file
+4. applica config auth/retry/timeout/insecure
+5. estrae digest output (o fallback `oras resolve`)
+
+Output CLI publish:
+- packet pubblicato (`name@version`)
+- `ref` OCI finale
+- `digest` risultante
+
+### 16.6 Come viene poi consumato (install)
+
+`cpm install` scarica artifact OCI in temp dir e si aspetta:
+- `packet.manifest.json` alla root artifact
+- `payload_root` (default `payload/`) da copiare nella destinazione locale
+
+Questo conferma che l'"immagine" pubblicata e` un artifact dati per packet distribution, non un'immagine container eseguibile.
+
+## 17. Conclusione
 
 Il build attuale combina in un unico comando:
 - preparazione dati (`scan + chunk`),
 - embedding/indexing,
 - metadata packet,
-- lock e verificabilita` artifact.
+- lock e verificabilita` artifact,
+- pubblicazione opzionale su OCI come artifact versionato.
 
 Il formato prodotto e` pensato per query locale veloce e per verifiche di coerenza/riproducibilita` tramite lockfile.
