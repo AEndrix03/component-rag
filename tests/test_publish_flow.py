@@ -82,6 +82,62 @@ def test_publish_no_embed_excludes_vectors(monkeypatch, tmp_path: Path) -> None:
     assert not any("index.faiss" in item for item in files)
 
 
+def test_publish_minimal_excludes_docs_and_embeddings(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    packet_dir = _create_packet_dir(tmp_path)
+    captured: dict[str, object] = {}
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def push(self, ref, spec):
+            captured["files"] = [str(path) for path in spec.files]
+            return type("PushResult", (), {"ref": ref, "digest": "sha256:" + ("d" * 64)})()
+
+    import cpm_core.builtins.publish as publish_mod
+
+    monkeypatch.setattr(publish_mod, "OciClient", _FakeOciClient)
+    code = cli_main(
+        ["publish", "--from-dir", str(packet_dir), "--registry", "registry.local/project", "--minimal"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    files = [str(item) for item in captured["files"]]
+    assert not any("docs.jsonl" in item for item in files)
+    assert not any("vectors.f16.bin" in item for item in files)
+    assert not any("index.faiss" in item for item in files)
+
+
+def test_publish_with_no_docs_keeps_embeddings(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    packet_dir = _create_packet_dir(tmp_path)
+    captured: dict[str, object] = {}
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def push(self, ref, spec):
+            captured["files"] = [str(path) for path in spec.files]
+            return type("PushResult", (), {"ref": ref, "digest": "sha256:" + ("d" * 64)})()
+
+    import cpm_core.builtins.publish as publish_mod
+
+    monkeypatch.setattr(publish_mod, "OciClient", _FakeOciClient)
+    code = cli_main(
+        ["publish", "--from-dir", str(packet_dir), "--registry", "registry.local/project", "--no-docs"],
+        start_dir=tmp_path,
+    )
+    assert code == 0
+    files = [str(item) for item in captured["files"]]
+    assert not any("docs.jsonl" in item for item in files)
+    assert any("vectors.f16.bin" in item for item in files)
+    assert any("index.faiss" in item for item in files)
+
+
 def test_publish_rejects_http_registry(monkeypatch, tmp_path: Path, capfd) -> None:
     workspace_root = tmp_path / ".cpm"
     monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
@@ -158,3 +214,16 @@ def test_publish_reports_missing_manifest_for_invalid_from_dir(monkeypatch, tmp_
     captured = capfd.readouterr()
     assert code == 1
     assert "[cpm:publish] no packet found in --from-dir" in captured.out
+
+
+def test_publish_rejects_incompatible_modes(monkeypatch, tmp_path: Path, capfd) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    packet_dir = _create_packet_dir(tmp_path)
+    code = cli_main(
+        ["publish", "--from-dir", str(packet_dir), "--registry", "registry.local/project", "--minimal", "--full"],
+        start_dir=tmp_path,
+    )
+    captured = capfd.readouterr()
+    assert code == 1
+    assert "--minimal and --full are mutually exclusive" in captured.out

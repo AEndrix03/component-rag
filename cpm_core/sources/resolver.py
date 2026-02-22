@@ -5,9 +5,11 @@ import tempfile
 import tomllib
 from dataclasses import asdict
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from cpm_core.oci import OciClient, OciClientConfig
+from cpm_core.oci.packet_metadata import validate_packet_metadata
+from cpm_core.oci.packaging import CPM_MANIFEST_MEDIATYPE
 from cpm_core.oci.security import evaluate_trust_report
 
 from .cache import SourceCache
@@ -18,6 +20,8 @@ class CPMSource(Protocol):
     def can_handle(self, uri: str) -> bool: ...
 
     def resolve(self, uri: str) -> PacketReference: ...
+
+    def inspect_metadata(self, uri: str, cache: SourceCache) -> tuple[PacketReference, dict[str, Any]]: ...
 
     def fetch(self, ref: PacketReference, cache: SourceCache) -> LocalPacket: ...
 
@@ -75,12 +79,13 @@ class OciSource:
             if not version:
                 raise ValueError("invalid OCI source URI: missing version")
             return f"{name}:{version}"
+        slash_index = raw.rfind("/")
+        colon_index = raw.rfind(":")
+        if colon_index <= slash_index:
+            return f"{raw}:latest"
         return raw
 
-    def resolve(self, uri: str) -> PacketReference:
-        ref = self._to_ref(uri)
-        client = self._client()
-        digest = client.resolve(ref)
+    def _verify(self, client: OciClient, ref: str, digest: str) -> dict[str, Any]:
         verification_cfg = _load_oci_config(self.workspace_root)
         strict = bool(verification_cfg.get("strict_verify", True))
         report = evaluate_trust_report(
@@ -93,6 +98,13 @@ class OciSource:
         if strict and report.strict_failures:
             failures = ",".join(report.strict_failures)
             raise ValueError(f"OCI source verification failed: {failures}")
+        return {"trust_score": report.trust_score, "verification": asdict(report)}
+
+    def resolve(self, uri: str) -> PacketReference:
+        ref = self._to_ref(uri)
+        client = self._client()
+        digest = client.resolve(ref)
+        verification = self._verify(client, ref, digest)
         return PacketReference(
             uri=uri,
             resolved_uri=f"oci://{ref}",
@@ -100,10 +112,76 @@ class OciSource:
             metadata={
                 "source": "oci",
                 "ref": ref,
-                "trust_score": report.trust_score,
-                "verification": asdict(report),
+                **verification,
             },
         )
+
+    def inspect_metadata(self, uri: str, cache: SourceCache) -> tuple[PacketReference, dict[str, Any]]:
+        ref = self._to_ref(uri)
+        client = self._client()
+        digest = client.resolve(ref)
+        cached = cache.read_metadata(digest=digest)
+        if cached is not None:
+            metadata_payload = cached
+            metadata_digest = str(cached.get("_metadata_digest") or "")
+        else:
+            manifest = client.fetch_manifest(ref)
+            metadata_digest = _select_metadata_digest(manifest)
+            if metadata_digest:
+                blob = client.fetch_blob(ref, metadata_digest)
+                parsed = json.loads(blob.decode("utf-8"))
+                if not isinstance(parsed, dict):
+                    raise ValueError("invalid packet metadata payload")
+                metadata_payload = _normalize_metadata_payload(parsed)
+            else:
+                metadata_payload = self._read_legacy_metadata(client, ref)
+                metadata_digest = ""
+            metadata_payload["_metadata_digest"] = metadata_digest
+            cache.write_metadata(digest=digest, payload=metadata_payload)
+        verification = self._verify(client, ref, digest)
+        reference = PacketReference(
+            uri=uri,
+            resolved_uri=f"oci://{ref}",
+            digest=digest,
+            metadata={
+                "source": "oci",
+                "ref": ref,
+                "metadata_digest": metadata_digest,
+                **verification,
+            },
+        )
+        return reference, metadata_payload
+
+    def _read_legacy_metadata(self, client: OciClient, ref: str) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory(prefix="cpm-source-oci-legacy-") as tmp:
+            pull_dir = Path(tmp) / "artifact"
+            client.pull(ref, pull_dir)
+            manifest_path = pull_dir / "packet.manifest.json"
+            if manifest_path.exists():
+                try:
+                    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:
+                    payload = {}
+                if isinstance(payload, dict):
+                    return _normalize_metadata_payload(payload)
+            payload_root = "payload"
+            cpm_path = pull_dir / payload_root / "cpm.yml"
+            packet_name = "unknown"
+            packet_version = "unknown"
+            if cpm_path.exists():
+                for line in cpm_path.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("name:"):
+                        packet_name = line.split(":", 1)[1].strip()
+                    elif line.startswith("version:"):
+                        packet_version = line.split(":", 1)[1].strip()
+            fallback = {
+                "schema": "cpm.packet.metadata",
+                "schema_version": "1.0",
+                "packet": {"name": packet_name, "version": packet_version},
+                "payload": {"files": []},
+            }
+            validate_packet_metadata(fallback)
+            return fallback
 
     def fetch(self, ref: PacketReference, cache: SourceCache) -> LocalPacket:
         client = self._client()
@@ -137,3 +215,46 @@ class SourceResolver:
         reference = self._source.resolve(uri)
         packet = self._source.fetch(reference, self.cache)
         return reference, packet
+
+    def lookup_metadata(self, uri: str) -> tuple[PacketReference, dict[str, Any]]:
+        if not self._source.can_handle(uri):
+            raise ValueError("unsupported source URI: only oci:// is supported")
+        return self._source.inspect_metadata(uri, self.cache)
+
+
+def _select_metadata_digest(manifest_payload: dict[str, Any]) -> str | None:
+    layers = manifest_payload.get("layers")
+    if not isinstance(layers, list):
+        return None
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        media_type = str(layer.get("mediaType") or "").strip()
+        if media_type != CPM_MANIFEST_MEDIATYPE:
+            continue
+        digest = str(layer.get("digest") or "").strip()
+        if digest:
+            return digest
+    return None
+
+
+def _normalize_metadata_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("schema") == "cpm-oci/v1":
+        packet = payload.get("packet") if isinstance(payload.get("packet"), dict) else {}
+        normalized = {
+            "schema": "cpm.packet.metadata",
+            "schema_version": "1.0",
+            "packet": {
+                "name": str(packet.get("name") or ""),
+                "version": str(packet.get("version") or ""),
+            },
+            "payload": {"files": []},
+            "payload_root": str(payload.get("payload_root") or "payload"),
+        }
+        source_manifest = payload.get("source_manifest")
+        if isinstance(source_manifest, dict):
+            normalized["source_manifest"] = source_manifest
+        validate_packet_metadata(normalized)
+        return normalized
+    validate_packet_metadata(payload)
+    return payload

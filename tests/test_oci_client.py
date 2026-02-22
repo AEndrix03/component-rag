@@ -144,3 +144,29 @@ def test_evaluate_trust_report_strict_fails_when_signature_missing() -> None:
     report = evaluate_trust_report(referrers, strict=True, require_signature=True, require_sbom=True)
     assert report.signature_valid is False
     assert "missing_or_invalid_signature" in report.strict_failures
+
+
+def test_fetch_manifest_returns_json_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"schemaVersion": 2, "layers": []}
+
+    def _fake_run(command, **kwargs):
+        del kwargs
+        assert command[:3] == ["oras", "manifest", "fetch"]
+        return _completed(stdout=json.dumps(payload))
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
+    manifest = client.fetch_manifest("registry.local/team/repo:1.0.0")
+    assert manifest["schemaVersion"] == 2
+
+
+def test_fetch_blob_returns_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_run(command, **kwargs):
+        del kwargs
+        assert command[:3] == ["oras", "blob", "fetch"]
+        return _completed(stdout="{\"schema\":\"cpm.packet.metadata\"}")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
+    blob = client.fetch_blob("registry.local/team/repo:1.0.0", "sha256:" + ("f" * 64))
+    assert b"cpm.packet.metadata" in blob

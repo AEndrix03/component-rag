@@ -8,18 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cpm_core.packet import load_manifest
+from cpm_core.oci.packet_metadata import build_packet_metadata, file_sha256_hex
 
 CPM_OCI_MANIFEST = "packet.manifest.json"
 CPM_OCI_LOCK = "packet.lock.json"
 CPM_LAYER_MEDIATYPE = "application/vnd.cpm.packet.layer.v1.tar+gzip"
 CPM_MANIFEST_MEDIATYPE = "application/vnd.cpm.packet.manifest.v1+json"
 CPM_LOCK_MEDIATYPE = "application/vnd.cpm.packet.lock.v1+json"
-
-_BASE_PACKET_FILES = (
-    "cpm.yml",
-    "manifest.json",
-    "docs.jsonl",
-)
 
 _EMBED_PACKET_FILES = (
     "vectors.f16.bin",
@@ -46,7 +41,15 @@ def digest_ref_for(repository: str, name: str, digest: str) -> str:
     return f"{repo}/{name}@{digest}"
 
 
-def build_oci_layout(packet_dir: Path, staging_dir: Path, *, include_embeddings: bool = True) -> OciPacketLayout:
+def build_oci_layout(
+    packet_dir: Path,
+    staging_dir: Path,
+    *,
+    include_embeddings: bool = True,
+    include_docs: bool = True,
+    minimal: bool = False,
+    include_source_manifest: bool = False,
+) -> OciPacketLayout:
     packet_dir = packet_dir.resolve()
     if not packet_dir.exists():
         raise FileNotFoundError(f"packet directory not found: {packet_dir}")
@@ -65,12 +68,20 @@ def build_oci_layout(packet_dir: Path, staging_dir: Path, *, include_embeddings:
     media_types: dict[str, str] = {}
     included: list[Path] = []
 
+    if minimal:
+        include_docs = False
+        include_embeddings = False
+
     payload_dir = staging_dir / "payload"
     payload_dir.mkdir(parents=True, exist_ok=True)
-    packet_files = list(_BASE_PACKET_FILES)
+    packet_files = ["cpm.yml", "manifest.json"]
+    if include_docs:
+        packet_files.append("docs.jsonl")
     if include_embeddings:
         packet_files.extend(_EMBED_PACKET_FILES)
 
+    payload_entries: list[dict[str, object]] = []
+    payload_included: list[Path] = []
     for rel in packet_files:
         src = packet_dir / rel
         if not src.exists():
@@ -78,18 +89,38 @@ def build_oci_layout(packet_dir: Path, staging_dir: Path, *, include_embeddings:
         dst = payload_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        included.append(dst)
+        payload_included.append(dst)
+        payload_entries.append(
+            {
+                "name": rel,
+                "digest": f"sha256:{file_sha256_hex(dst)}",
+                "size": int(dst.stat().st_size),
+            }
+        )
 
-    manifest_payload = {
-        "schema": "cpm-oci/v1",
-        "packet": {"name": packet_name, "version": packet_version},
-        "source_manifest": raw_manifest.to_dict(),
-        "payload_root": "payload",
-        "options": {"include_embeddings": include_embeddings},
-    }
+    source_manifest = raw_manifest.to_dict()
+    manifest_payload = build_packet_metadata(
+        packet_name=packet_name,
+        packet_version=packet_version,
+        source_manifest=source_manifest,
+        payload_files=payload_entries,
+        payload_full_ref=None,
+        source_manifest_digest=f"sha256:{file_sha256_hex(packet_dir / 'manifest.json')}",
+        include_source_manifest=include_source_manifest,
+        build_options={
+            "minimal": minimal,
+            "include_docs": include_docs,
+            "include_embeddings": include_embeddings,
+        },
+    )
+    manifest_payload["payload_root"] = "payload"
     oci_manifest_path = staging_dir / CPM_OCI_MANIFEST
-    oci_manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    oci_manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
     included.append(oci_manifest_path)
+    included.extend(payload_included)
     media_types[oci_manifest_path.name] = CPM_MANIFEST_MEDIATYPE
 
     lock_path = packet_dir / "packet.lock.json"

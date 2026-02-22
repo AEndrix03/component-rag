@@ -157,6 +157,13 @@ class InstallCommand(_WorkspaceAwareCommand):
             model_artifact = None
             if not no_embed:
                 source_manifest = payload.get("source_manifest") if isinstance(payload.get("source_manifest"), dict) else {}
+                if not source_manifest:
+                    payload_manifest_path = packet_payload_dir / "manifest.json"
+                    if payload_manifest_path.exists():
+                        try:
+                            source_manifest = json.loads(payload_manifest_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            source_manifest = {}
                 selection = _select_model(
                     workspace_root=workspace_root,
                     manifest=source_manifest,

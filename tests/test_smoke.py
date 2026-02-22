@@ -21,8 +21,12 @@ def test_bootstrap_without_plugins(tmp_path: Path) -> None:
 
     assert status.plugins == ("core",)
     assert status.commands == (
+        "benchmark",
+        "benchmark-trend",
         "build",
+        "catalog",
         "default-builder",
+        "diff",
         "doctor",
         "embed",
         "help",
@@ -35,6 +39,7 @@ def test_bootstrap_without_plugins(tmp_path: Path) -> None:
         "pkg",
         "publish",
         "query",
+        "replay",
     )
     assert status.registry_status == "online"
 
@@ -49,8 +54,12 @@ def test_bootstrap_with_sample_plugin(tmp_path: Path) -> None:
 
     assert status.plugins == ("core", "sample_plugin")
     expected = (
+        "benchmark",
+        "benchmark-trend",
         "build",
+        "catalog",
         "default-builder",
+        "diff",
         "doctor",
         "embed",
         "help",
@@ -63,6 +72,7 @@ def test_bootstrap_with_sample_plugin(tmp_path: Path) -> None:
         "pkg",
         "publish",
         "query",
+        "replay",
         "sample-builder",
         "sample-command",
     )

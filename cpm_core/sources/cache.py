@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from .models import LocalPacket
 
@@ -27,8 +29,10 @@ class SourceCache:
         self.workspace_root = workspace_root.resolve()
         self.root = self.workspace_root / "cache"
         self.objects = self.root / "objects"
+        self.metadata = self.root / "metadata"
         self.max_objects = max(int(max_objects), 1)
         self.objects.mkdir(parents=True, exist_ok=True)
+        self.metadata.mkdir(parents=True, exist_ok=True)
 
     def materialize_directory(self, source_dir: Path, *, digest: str) -> LocalPacket:
         key = _safe_cache_key(digest)
@@ -46,3 +50,18 @@ class SourceCache:
             return
         for stale in sorted(objects, key=lambda item: item.stat().st_mtime)[: len(objects) - self.max_objects]:
             shutil.rmtree(stale, ignore_errors=True)
+
+    def read_metadata(self, *, digest: str) -> dict[str, Any] | None:
+        key = _safe_cache_key(digest)
+        path = self.metadata / f"{key}.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def write_metadata(self, *, digest: str, payload: dict[str, Any]) -> None:
+        key = _safe_cache_key(digest)
+        path = self.metadata / f"{key}.json"
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")

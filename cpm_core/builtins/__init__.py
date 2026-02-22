@@ -9,6 +9,7 @@ from cpm_core.registry import CPMRegistryEntry, FeatureRegistry
 from .benchmark import BenchmarkCommand
 from .benchmark_trend import BenchmarkTrendCommand
 from .build import BuildCommand, register_builtin_builders
+from .catalog import CatalogCommand
 from .commands import (
     HelpCommand,
     InitCommand,
@@ -46,6 +47,7 @@ _BUILTIN_FEATURES: Sequence[type] = (
     ReplayCommand,
     DiffCommand,
     LookupCommand,
+    CatalogCommand,
     HelpCommand,
     ListingCommand,
 )

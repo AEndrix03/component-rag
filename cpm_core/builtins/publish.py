@@ -26,6 +26,12 @@ class PublishCommand(_WorkspaceAwareCommand):
         parser.add_argument("--registry", help="OCI registry repository, e.g. harbor.local/project")
         parser.add_argument("--insecure", action="store_true", help="Allow insecure TLS for OCI operations")
         parser.add_argument("--no-embed", action="store_true", help="Publish packet without vectors/faiss artifacts")
+        parser.add_argument("--minimal", action="store_true", help="Publish only minimal payload (no docs, no embeddings)")
+        parser.add_argument("--full", action="store_true", help="Publish full payload mode")
+        parser.add_argument("--with-docs", action="store_true", help="Include docs.jsonl in artifact payload")
+        parser.add_argument("--no-docs", action="store_true", help="Exclude docs.jsonl from artifact payload")
+        parser.add_argument("--with-embeddings", action="store_true", help="Include vectors/faiss artifacts")
+        parser.add_argument("--no-embeddings", action="store_true", help="Exclude vectors/faiss artifacts")
 
     def run(self, argv: Any) -> int:
         workspace_root = self._resolve(getattr(argv, "workspace_dir", None))
@@ -62,18 +68,50 @@ class PublishCommand(_WorkspaceAwareCommand):
             )
         )
 
-        include_embeddings = not bool(getattr(argv, "no_embed", False))
+        minimal_mode = bool(getattr(argv, "minimal", False))
+        full_mode = bool(getattr(argv, "full", False))
+        if minimal_mode and full_mode:
+            print("[cpm:publish] --minimal and --full are mutually exclusive")
+            return 1
+        default_docs = not minimal_mode
+        default_embeddings = not minimal_mode
+
+        include_docs = default_docs
+        if bool(getattr(argv, "with_docs", False)):
+            include_docs = True
+        if bool(getattr(argv, "no_docs", False)):
+            include_docs = False
+
+        include_embeddings = default_embeddings
+        if bool(getattr(argv, "with_embeddings", False)):
+            include_embeddings = True
+        if bool(getattr(argv, "no_embeddings", False)):
+            include_embeddings = False
+        if bool(getattr(argv, "no_embed", False)):
+            include_embeddings = False
+
         try:
             with tempfile.TemporaryDirectory(prefix="cpm-publish-") as tmp:
-                layout = build_oci_layout(packet_dir, Path(tmp) / "staging", include_embeddings=include_embeddings)
+                layout = build_oci_layout(
+                    packet_dir,
+                    Path(tmp) / "staging",
+                    include_embeddings=include_embeddings,
+                    include_docs=include_docs,
+                    minimal=minimal_mode,
+                )
                 ref = package_ref_for(name=layout.packet_name, version=layout.packet_version, repository=repository)
                 spec = build_artifact_spec(list(layout.files), media_types=layout.media_types)
                 result = client.push(ref, spec)
                 print(f"[cpm:publish] published {layout.packet_name}@{layout.packet_version}")
                 print(f"[cpm:publish] ref={result.ref}")
                 print(f"[cpm:publish] digest={result.digest}")
-                if not include_embeddings:
-                    print("[cpm:publish] mode=no-embed (vectors/faiss excluded)")
+                if minimal_mode:
+                    print("[cpm:publish] mode=minimal (docs/vectors/faiss excluded)")
+                elif not include_docs or not include_embeddings:
+                    print(
+                        "[cpm:publish] mode=custom "
+                        f"(docs={'on' if include_docs else 'off'} embeddings={'on' if include_embeddings else 'off'})"
+                    )
             return 0
         except (FileNotFoundError, ValueError) as exc:
             print(f"[cpm:publish] failed: {exc}")

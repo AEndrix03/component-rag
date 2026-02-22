@@ -9,7 +9,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from .errors import OciCommandError, OciNotSupportedError
 from .security import assert_allowlisted, redact_command_for_log
@@ -65,6 +65,21 @@ class OciClient:
         self._enforce_size_limit(files)
         digest = _extract_digest(result.stdout) or _extract_digest(result.stderr)
         return OciPullResult(ref=ref_or_digest, digest=digest, files=files)
+
+    def fetch_manifest(self, ref_or_digest: str) -> dict[str, Any]:
+        assert_allowlisted(ref_or_digest, self.config.allowlist_domains)
+        result = self._run(["oras", "manifest", "fetch", ref_or_digest])
+        payload = _parse_json_document(result.stdout)
+        if not isinstance(payload, dict):
+            raise OciCommandError("unable to parse OCI manifest payload")
+        return payload
+
+    def fetch_blob(self, ref_or_digest: str, digest: str) -> bytes:
+        assert_allowlisted(ref_or_digest, self.config.allowlist_domains)
+        if not digest:
+            raise OciCommandError("missing blob digest")
+        result = self._run(["oras", "blob", "fetch", ref_or_digest, digest])
+        return (result.stdout or "").encode("utf-8")
 
     def discover_referrers(self, ref_or_digest: str) -> list[OciReferrer]:
         assert_allowlisted(ref_or_digest, self.config.allowlist_domains)
@@ -262,6 +277,16 @@ def _parse_referrers_payload(payload: str) -> list[OciReferrer]:
             )
         )
     return results
+
+
+def _parse_json_document(payload: str | None) -> Any:
+    text = (payload or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise OciCommandError("invalid JSON payload from oras command") from exc
 
 
 def _repository_for_tags(ref_or_digest: str) -> str:

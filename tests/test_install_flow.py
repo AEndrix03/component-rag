@@ -229,3 +229,44 @@ def test_install_rejects_http_registry(tmp_path: Path, capfd) -> None:
     out = capfd.readouterr().out
     assert code == 1
     assert "HTTP(S) registry URLs are not supported" in out
+
+
+def test_install_falls_back_to_payload_manifest_when_source_manifest_missing(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / ".cpm"
+    monkeypatch.setenv("RAG_CPM_DIR", str(workspace_root))
+    _write_workspace_config(workspace_root)
+    _write_embeddings_config(workspace_root, with_artifacts=False)
+    packet_artifact = _create_oci_packet_artifact(tmp_path, model="model-a")
+    metadata_path = packet_artifact / "packet.manifest.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.pop("source_manifest", None)
+    metadata["schema"] = "cpm.packet.metadata"
+    metadata["schema_version"] = "1.0"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    class _FakeOciClient:
+        def __init__(self, config):
+            self.config = config
+
+        def resolve(self, ref: str) -> str:
+            return "sha256:" + ("a" * 64)
+
+        def discover_referrers(self, subject_ref: str):
+            del subject_ref
+            return []
+
+        def pull(self, ref: str, output_dir: Path):
+            shutil.copytree(packet_artifact, output_dir, dirs_exist_ok=True)
+            files = tuple(path for path in output_dir.rglob("*") if path.is_file())
+            return type("PullResult", (), {"ref": ref, "digest": None, "files": files})()
+
+    import cpm_core.builtins.install as install_mod
+
+    monkeypatch.setattr(install_mod, "OciClient", _FakeOciClient)
+    monkeypatch.setattr(
+        install_mod,
+        "_select_model",
+        lambda **kwargs: {"model": "model-a", "provider": None, "suggested_retriever": "cpm:native-retriever"},
+    )
+    code = cli_main(["install", "demo@1.0.0", "--registry", "registry.local/project"], start_dir=tmp_path)
+    assert code == 0
