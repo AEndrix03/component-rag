@@ -669,6 +669,10 @@ class QueryCommand(_WorkspaceAwareCommand):
                 print(f"[cpm:query] available retrievers: {available}")
             return None
         if len(matches) > 1:
+            if requested == DEFAULT_RETRIEVER:
+                for entry in matches:
+                    if entry.group == "cpm":
+                        return entry
             if not quiet:
                 names = ", ".join(sorted(entry.qualified_name for entry in matches))
                 print(

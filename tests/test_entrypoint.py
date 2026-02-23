@@ -179,6 +179,74 @@ def test_query_command_supports_custom_retriever_selection(
     assert "[cpm:query] retriever=sample:custom-retriever packet=my-docs k=5" in out
 
 
+def test_query_command_prefers_cpm_native_retriever_when_ambiguous(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli_main = importlib.import_module("cpm_cli.main")
+    query_builtin = importlib.import_module("cpm_core.builtins.query")
+
+    captured: dict[str, object] = {}
+
+    def _fake_native(self, identifier: str, **kwargs):
+        captured["called"] = "cpm"
+        return {
+            "ok": True,
+            "packet": kwargs.get("packet"),
+            "query": identifier,
+            "k": kwargs.get("k", 5),
+            "results": [],
+        }
+
+    class _PluginNative:
+        def retrieve(self, identifier: str, **kwargs):
+            captured["called"] = "plugin"
+            return {
+                "ok": True,
+                "packet": kwargs.get("packet"),
+                "query": identifier,
+                "k": kwargs.get("k", 5),
+                "results": [],
+            }
+
+    monkeypatch.setattr(query_builtin.NativeFaissRetriever, "retrieve", _fake_native)
+
+    cpm_entry = CPMRegistryEntry(
+        group="cpm",
+        name="native-retriever",
+        target=query_builtin.NativeFaissRetriever,
+        kind="retriever",
+        origin="builtin",
+    )
+    plugin_entry = CPMRegistryEntry(
+        group="mcp",
+        name="native-retriever",
+        target=_PluginNative,
+        kind="retriever",
+        origin="plugin",
+    )
+    monkeypatch.setattr(
+        query_builtin.QueryCommand,
+        "_load_retriever_entries",
+        lambda self, workspace_root: [plugin_entry, cpm_entry],
+    )
+
+    code = cli_main.main(
+        [
+            "query",
+            "--packet",
+            "my-docs",
+            "--query",
+            "auth",
+        ],
+        start_dir=tmp_path,
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert captured.get("called") == "cpm"
+    assert "[cpm:query] retriever=cpm:native-retriever packet=my-docs k=5" in out
+
+
 def test_query_command_passes_indexer_and_reranker(
     monkeypatch, tmp_path: Path
 ) -> None:

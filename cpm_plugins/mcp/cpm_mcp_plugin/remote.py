@@ -13,7 +13,6 @@ from typing import Any
 
 from cpm_builtin.embeddings import EmbeddingClient
 from cpm_core.build.builder import Embedder, embed_packet_from_chunks
-from cpm_core.builtins.query import NativeFaissRetriever
 from cpm_core.sources.models import LocalPacket, PacketReference
 from cpm_core.sources.resolver import SourceResolver
 
@@ -172,7 +171,7 @@ def query_remote(
     except Exception as exc:
         return {"ok": False, "error": "index_failed", "detail": str(exc), "digest": materialized.digest}
 
-    retriever = NativeFaissRetriever()
+    retriever = _build_native_retriever()
     result = retriever.retrieve(
         q,
         packet=str(materialized.payload_dir),
@@ -370,6 +369,13 @@ def _materialize_for_query(*, settings: MCPSettings, source_uri: str) -> QueryMa
         metadata_path=metadata_path,
         cache_hit=False,
     )
+
+
+def _build_native_retriever() -> Any:
+    # Import lazily to avoid re-exporting decorated feature classes from plugin modules.
+    from cpm_core.builtins.query import NativeFaissRetriever
+
+    return NativeFaissRetriever()
 
 
 def _ensure_query_index(*, settings: MCPSettings, materialized: QueryMaterialization) -> None:

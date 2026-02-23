@@ -102,7 +102,7 @@ def test_query_remote_cache_hit_skips_remote_fetch(monkeypatch, tmp_path: Path) 
             }
 
     monkeypatch.setattr(remote, "SourceResolver", _ResolverShouldNotRun)
-    monkeypatch.setattr(remote, "NativeFaissRetriever", _FakeRetriever)
+    monkeypatch.setattr(remote, "_build_native_retriever", lambda: _FakeRetriever())
 
     payload = remote.query_remote(ref=f"oci://registry.local/project/demo@{digest}", q="auth setup", k=3)
     assert payload["ok"] is True
@@ -145,7 +145,7 @@ def test_query_remote_cache_miss_materializes_and_caches(monkeypatch, tmp_path: 
             }
 
     monkeypatch.setattr(remote, "SourceResolver", _FakeResolver)
-    monkeypatch.setattr(remote, "NativeFaissRetriever", _FakeRetriever)
+    monkeypatch.setattr(remote, "_build_native_retriever", lambda: _FakeRetriever())
 
     payload = remote.query_remote(ref="oci://registry.local/project/demo:latest", q="auth setup", k=3)
     assert payload["ok"] is True
