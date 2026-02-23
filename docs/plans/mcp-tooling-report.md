@@ -1,162 +1,143 @@
-# MCP Tooling Report (CPM) - Stato Attuale
+# MCP Tooling Report (CPM) - Flusso Unificato Aggiornato
 
-## Obiettivo
-Questo report descrive il flusso MCP attuale nel repository, i tool esposti, come viene eseguita una query e come funziona il richiamo lazy verso OCI.
+Questo report descrive il flusso MCP aggiornato nel repository, con lookup/query remoti, cache hit/miss su `CPM_ROOT`, tool di pianificazione e digest evidenze.
 
-## Perimetro analizzato
-- Plugin MCP: `cpm_plugins/mcp/cpm_mcp_plugin/`
-- Builtin query: `cpm_core/builtins/query.py`
-- Builtin lookup: `cpm_core/builtins/lookup.py`
-- Resolver sorgenti OCI: `cpm_core/sources/resolver.py`
-- Packaging metadata OCI: `cpm_core/oci/packaging.py`, `cpm_core/oci/packet_metadata.py`
+## 1) Tool MCP esposti
 
-## 1) Come si avvia il flusso MCP
+Entrypoint: `cpm_plugins/mcp/cpm_mcp_plugin/server.py`
 
-### 1.1 Registrazione plugin
-- `cpm_plugins/mcp/plugin.toml`
-  - `id = "mcp"`
-  - `group = "mcp"`
-  - `entrypoint = "cpm_mcp_plugin.entrypoint:MCPEntrypoint"`
-- `MCPEntrypoint.init()` carica:
-  - `features.MCPServeCommand`
-  - `server` (per registrare i tool FastMCP)
+- `lookup`
+- `query`
+- `plan_from_intent`
+- `evidence_digest`
 
-### 1.2 Comando di avvio server
-- Classe: `MCPServeCommand` in `cpm_plugins/mcp/cpm_mcp_plugin/features.py`
-- Comando: `cpm mcp:serve`
-- Parametri principali:
-  - `--cpm-dir` (default `.cpm`)
-  - `--embed-url`
-  - `--embeddings-mode` (`http|legacy`)
-- `run_server(...)` imposta env (`RAG_CPM_DIR`, `RAG_EMBED_URL`, `RAG_EMBED_MODE`) e avvia `mcp.run()`.
+Registrazione tramite `FastMCP`.
 
-## 2) Tool MCP esposti oggi
+## 2) Contratto config runtime
 
-File: `cpm_plugins/mcp/cpm_mcp_plugin/server.py`
+Modulo: `cpm_plugins/mcp/cpm_mcp_plugin/env.py`
 
-### 2.1 `lookup` (tool MCP)
-- Signature:
-  - `lookup(cpm_dir: str | None = None, include_all_versions: bool = False)`
-- Implementazione:
-  - usa `PacketReader.list_packets(...)`
-  - lavora su packet locali installati sotto `.cpm`
-- Output:
-  - `{ ok, cpm_dir, packets, count }`
+Env principali:
 
-### 2.2 `query` (tool MCP)
-- Signature:
-  - `query(packet: str, query: str, k: int = 5, cpm_dir: str | None = None, embed_url: Optional[str] = None, embed_mode: Optional[str] = None)`
-- Implementazione:
-  - costruisce `PacketRetriever(...)`
-  - legge `manifest.json`, `docs.jsonl`, indice FAISS locale
-  - calcola embedding query via `EmbeddingClient`
-  - fa nearest-neighbor su FAISS e ritorna top-k
-- Output:
-  - payload con `ok`, `packet`, `query`, `k`, `embedding`, `results`
+- `REGISTRY`
+- `CPM_ROOT` (default `.cpm`)
+- `EMBEDDING_URL`
+- `EMBEDDING_MODEL`
 
-Nota: il `query` MCP attuale e` focalizzato su packet locali; non espone direttamente il path lazy OCI del builtin `cpm query`.
+Compatibilità:
 
-## 3) Flusso completo di una query (CLI core)
+- `RAG_CPM_DIR` fallback di `CPM_ROOT`
+- `RAG_EMBED_URL` fallback di `EMBEDDING_URL`
+- `RAG_EMBED_MODE` fallback del transport mode (`http` default)
 
-Entry point: `QueryCommand.run()` in `cpm_core/builtins/query.py`
+Precedenza:
 
-### 3.1 Pipeline
-1. Risolve workspace e carica policy/hub settings.
-2. Determina sorgente:
-   - `--packet` locale, oppure
-   - `--source oci://...`, oppure
-   - `--registry ...` (shortcut lazy OCI).
-3. Se c'e` una source OCI:
-   - policy check locale/remota,
-   - `SourceResolver.resolve_and_fetch(source_uri)`,
-   - materializzazione in cache locale.
-4. Risolve retriever (esplicito, suggerito o default).
-5. Risolve trasporto embedding (`--embed-url`, config, fallback).
-6. Esegue retrieval (`_invoke_retriever`), opzionale compile context e policy token.
-7. Produce output `text` o `json`, e replay log.
+- args tool > env > default (solo `CPM_ROOT` ha default).
 
-## 4) Richiamo query lazy (OCI)
+## 3) Flusso `lookup` remoto (low-token)
 
-### 4.1 Come viene costruita la source
-Metodo: `QueryCommand._resolve_source_uri(...)`
-- Accetta:
-  - URI esplicita `oci://...`
-  - shortcut `--registry` + `--packet`
-- Conversioni principali:
-  - `oci://repo/name@1.2.3` -> ref OCI valida
-  - registry base senza schema + packet -> `oci://<registry>/<packet>`
+Implementazione: `cpm_plugins/mcp/cpm_mcp_plugin/remote.py::lookup_remote`
 
-### 4.2 Come avviene la risoluzione lazy
-In `QueryCommand.run()`:
-- chiamata a `SourceResolver.resolve_and_fetch(source_uri)`
-- `OciSource`:
-  - risolve digest remoto
-  - verifica trust (strict/non-strict)
-  - pull artifact in temp
-  - materializza payload in cache CAS locale
-- la query poi usa il packet locale materializzato.
+Pipeline:
 
-### 4.3 Esempi operativi (lazy query)
-```bash
-cpm query \
-  --packet demo@1.0.0 \
-  --registry harbor.local/cpm \
-  --query "come configuro l'entrypoint?" \
-  --format json
-```
-
-```bash
-cpm query \
-  --source oci://harbor.local/cpm/demo:latest \
-  --query "quali capability sono supportate?" \
-  -k 8
-```
-
-```bash
-cpm query \
-  --source oci://harbor.local/cpm/demo@sha256:... \
-  --query "mostrami snippet su autenticazione"
-```
-
-## 5) Lookup remoto low-token (manifest + 1 blob metadata)
-
-Builtin: `cpm lookup` in `cpm_core/builtins/lookup.py`
-
-### 5.1 Flusso remoto
-1. Risolve `source_uri` (`--source-uri` oppure `--registry + --name + --version/--alias`).
-2. `SourceResolver.lookup_metadata(source_uri)`.
-3. `OciSource.inspect_metadata(...)`:
+1. Costruisce `source_uri` da `ref` o da `REGISTRY + name + version/alias`.
+2. Usa `SourceResolver.lookup_metadata(...)` (`cpm_core/sources/resolver.py`).
+3. Path OCI metadata-only:
    - resolve digest
-   - fetch OCI manifest
-   - selezione layer metadata `application/vnd.cpm.packet.manifest.v1+json`
-   - fetch blob `packet.manifest.json`
-   - validazione/normalizzazione metadata
-   - cache per digest
-4. Applica filtri (`entrypoint`, `kind`, `capability`, `os`, `arch`).
-5. Ritorna `pinned_uri` digest-pinned.
+   - fetch manifest
+   - fetch blob `packet.manifest.json` (`application/vnd.cpm.packet.manifest.v1+json`)
+4. Filtra per `entrypoint`, `kind`, `capability`, `os`, `arch`.
+5. Ritorna shortlist deterministica (max 3) con `pinned_uri`.
 
-### 5.2 Esempio lookup remoto
-```bash
-cpm lookup \
-  --registry harbor.local/cpm \
-  --name demo \
-  --alias latest \
-  --entrypoint query \
-  --format json
-```
+Cache:
 
-## 6) Relazione tra MCP tools e lazy query
+- digest metadata: `CPM_ROOT/cache/metadata/*.json` (core resolver cache)
+- alias cache breve: `CPM_ROOT/cache/metadata_alias/*.json` (TTL su `latest` ecc.)
 
-- MCP `lookup` e MCP `query` (plugin FastMCP) sono orientati al workspace locale (`.cpm`).
-- Il comportamento lazy OCI completo e` oggi implementato nel builtin `cpm query` e nel builtin `cpm lookup` remoto.
-- In pratica:
-  - MCP server copre discovery/query locale rapida.
-  - CLI core copre pipeline estesa con source OCI lazy, trust/policy e metadata OCI ottimizzato.
+## 4) Flusso `query` lazy (local-hit / remote-miss)
 
-## 7) Chiamata "lazy" consigliata in integrazioni MCP
+Implementazione: `cpm_plugins/mcp/cpm_mcp_plugin/remote.py::query_remote`
 
-Per client MCP che vogliono modalità lazy OCI oggi:
-1. Eseguire `cpm lookup` remoto per ottenere `pinned_uri` e metadata minimale.
-2. Eseguire `cpm query --source <pinned_uri> ...` per materializzare on-demand e interrogare.
+Input tipico:
 
-Questo mantiene lookup leggero (manifest + metadata blob) e posticipa il fetch payload al solo caso di query effettiva.
+- `ref` digest-pinned da `lookup` (consigliato)
+- `q` testo query
+
+### 4.1 Cache hit
+
+Se `ref` contiene digest e sono presenti:
+
+- `CPM_ROOT/cas/<digest>/payload`
+- `CPM_ROOT/index/<digest>/<embedding_fingerprint>/index.faiss`
+
+la query esegue retrieval locale immediato senza fetch remoto.
+
+### 4.2 Cache miss
+
+Su miss:
+
+1. `SourceResolver.resolve_and_fetch(source_uri)` materializza payload.
+2. Mirror in `CPM_ROOT/cas/<digest>/payload`.
+3. Metadata locale in `CPM_ROOT/meta/<digest>/packet.manifest.json`.
+4. Indicizzazione:
+   - riuso `faiss/index.faiss` e `vectors.f16.bin` se presenti nel payload
+   - altrimenti rebuild da `docs.jsonl` con embedder HTTP (`EMBEDDING_URL`, `EMBEDDING_MODEL`)
+5. Cache index in `CPM_ROOT/index/<digest>/<embedding_fingerprint>/`.
+
+Controlli concorrenti:
+
+- lock file `.lock` per evitare rebuild simultanei dello stesso indice.
+
+Output token-min:
+
+- `results[]` con `{score, path, start, end, snippet}`.
+
+## 5) Tool `plan_from_intent`
+
+Implementazione: `remote.py::plan_from_intent`
+
+Strategia:
+
+1. Candidate generation (`name_hint` / `constraints.name` / hint nel testo).
+2. Scoring metadata-first (entrypoint/kind/capabilities).
+3. Query solo in caso di pareggio.
+4. Output piano deterministico:
+   - `selected[]` con `pinned_uri`, `entrypoint`, `args_template`, `why`
+   - `fallbacks[]`
+
+## 6) Tool `evidence_digest`
+
+Implementazione: `remote.py::evidence_digest`
+
+Pipeline:
+
+1. Invoca `query`.
+2. Dedup snippet (`path + snippet`).
+3. Trim con budget `max_chars`.
+4. Produce:
+   - `evidence[]` compresso
+   - `summary` tecnico breve.
+
+## 7) Richiamo lazy consigliato
+
+Per integrazioni MCP/LLM:
+
+1. `lookup` remoto per ottenere `pinned_uri`.
+2. `query` su `pinned_uri`.
+3. opzionale `evidence_digest` per comprimere il contesto.
+4. opzionale `plan_from_intent` per orchestrazione tool.
+
+Questo mantiene lookup molto leggero e sposta il costo payload solo quando serve davvero fare query.
+
+## 8) Verifica implementata
+
+Test dedicati:
+
+- `tests/test_mcp_tools_remote.py`
+  - lookup remote + alias cache
+  - query cache hit (no fetch remoto)
+  - query miss con materializzazione + cache index
+  - determinismo `plan_from_intent` / `evidence_digest`
+  - apply env overrides in `run_server`
+- `tests/test_mcp_plugin.py`
+  - registrazione comando plugin `mcp:serve`

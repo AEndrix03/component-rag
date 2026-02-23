@@ -114,6 +114,7 @@ Start here:
 
 Deep dives:
 - `docs/flows/query-flow.md`
+- `docs/mcp/README.md`
 - `docs/components/oci-publish-install.md`
 - `docs/operations/workspace-and-config.md`
 - `docs/operations/testing-and-quality.md`

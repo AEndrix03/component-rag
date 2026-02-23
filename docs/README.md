@@ -19,7 +19,13 @@ If you just cloned CPM and want to run it now:
 - `docs/flows/query-flow.md`
 - `docs/flows/publish-install-flow.md`
 - `docs/cli/publish.md`
-- `docs/mcp/lookup.md`
+- `docs/mcp/README.md`
+- `docs/mcp/config.md`
+- `docs/mcp/quickstart.md`
+- `docs/mcp/tools/lookup.md`
+- `docs/mcp/tools/query.md`
+- `docs/mcp/tools/plan_from_intent.md`
+- `docs/mcp/tools/evidence_digest.md`
 
 ### I want to understand architecture
 - `docs/architecture/system-overview.md`
