@@ -1,122 +1,162 @@
-# MCP Tooling Report (CPM)
+# MCP Tooling Report (CPM) - Stato Attuale
 
-## Objective
-Define high-impact MCP tools that let an LLM use CPM end-to-end (discovery, trust, retrieval, explainability), and close the current gap where `lookup` is local-only.
+## Obiettivo
+Questo report descrive il flusso MCP attuale nel repository, i tool esposti, come viene eseguita una query e come funziona il richiamo lazy verso OCI.
 
-## Current State (as-is)
+## Perimetro analizzato
+- Plugin MCP: `cpm_plugins/mcp/cpm_mcp_plugin/`
+- Builtin query: `cpm_core/builtins/query.py`
+- Builtin lookup: `cpm_core/builtins/lookup.py`
+- Resolver sorgenti OCI: `cpm_core/sources/resolver.py`
+- Packaging metadata OCI: `cpm_core/oci/packaging.py`, `cpm_core/oci/packet_metadata.py`
 
-### Strong points already available
-- CLI `query` already supports lazy OCI registry resolution via `--registry`/`--source`, trust verification, policy checks, and replay logging (`cpm_core/builtins/query.py`).
-- Source resolver has OCI resolution, trust evaluation, and CAS materialization (`cpm_core/sources/resolver.py`).
-- MCP server exists and is easy to run via `mcp:serve` (`cpm_plugins/mcp/cpm_mcp_plugin/features.py`).
+## 1) Come si avvia il flusso MCP
 
-### Main gaps for LLM workflows
-- `lookup` builtin is local filesystem inventory only (`--destination` under workspace), no registry mode (`cpm_core/builtins/lookup.py`).
-- MCP `lookup` is also local-only (`PacketReader.list_packets`), no remote discovery (`cpm_plugins/mcp/cpm_mcp_plugin/server.py`).
-- MCP `query` uses a simplified local `PacketRetriever` pipeline and does not expose full query capabilities (registry lazy source, policy/trust context, hybrid indexer/reranker, replay metadata).
-- Hub client currently exposes only remote policy evaluation (`cpm_core/hub/client.py`), no remote package discovery/search endpoint usage in CPM core.
+### 1.1 Registrazione plugin
+- `cpm_plugins/mcp/plugin.toml`
+  - `id = "mcp"`
+  - `group = "mcp"`
+  - `entrypoint = "cpm_mcp_plugin.entrypoint:MCPEntrypoint"`
+- `MCPEntrypoint.init()` carica:
+  - `features.MCPServeCommand`
+  - `server` (per registrare i tool FastMCP)
 
-## Proposed MCP Tools (priority order)
+### 1.2 Comando di avvio server
+- Classe: `MCPServeCommand` in `cpm_plugins/mcp/cpm_mcp_plugin/features.py`
+- Comando: `cpm mcp:serve`
+- Parametri principali:
+  - `--cpm-dir` (default `.cpm`)
+  - `--embed-url`
+  - `--embeddings-mode` (`http|legacy`)
+- `run_server(...)` imposta env (`RAG_CPM_DIR`, `RAG_EMBED_URL`, `RAG_EMBED_MODE`) e avvia `mcp.run()`.
 
-### P0 - Core value for agents
-1. `cpm_lookup`
-- Purpose: unified inventory (`scope=local|registry|both`).
-- Why: first call for any agent to choose context sources.
-- Key params: `scope`, `registry`, `packet`, `version`, `include_all_versions`, `tags`, `limit`.
-- Return: normalized packet descriptors with `location`, `source_uri`, `digest`, `trust_score`, `installed`.
+## 2) Tool MCP esposti oggi
 
-2. `cpm_query`
-- Purpose: single retrieval entrypoint for local + OCI lazy mode.
-- Why: avoid decision complexity in the LLM; one tool, many modes.
-- Key params: `packet`, `query`, `k`, `registry`, `source_uri`, `indexer`, `reranker`, `embed`.
-- Return: full query payload with `compiled_context`, citations, source verification summary, replay id/path.
+File: `cpm_plugins/mcp/cpm_mcp_plugin/server.py`
 
-3. `cpm_resolve_source`
-- Purpose: preflight source resolution and trust check without running full query.
-- Why: agents can validate provenance before expensive retrieval.
-- Key params: `source_uri` or (`registry` + `packet`), `strict_verify` override optional.
-- Return: `resolved_uri`, `digest`, `verification.strict_failures`, `trust_score`, `policy_decision`.
+### 2.1 `lookup` (tool MCP)
+- Signature:
+  - `lookup(cpm_dir: str | None = None, include_all_versions: bool = False)`
+- Implementazione:
+  - usa `PacketReader.list_packets(...)`
+  - lavora su packet locali installati sotto `.cpm`
+- Output:
+  - `{ ok, cpm_dir, packets, count }`
 
-### P1 - Agent productivity
-4. `cpm_inspect_packet`
-- Purpose: inspect schema/manifest/embedding compatibility for a packet.
-- Why: prevents bad queries (wrong model/dim/missing index).
+### 2.2 `query` (tool MCP)
+- Signature:
+  - `query(packet: str, query: str, k: int = 5, cpm_dir: str | None = None, embed_url: Optional[str] = None, embed_mode: Optional[str] = None)`
+- Implementazione:
+  - costruisce `PacketRetriever(...)`
+  - legge `manifest.json`, `docs.jsonl`, indice FAISS locale
+  - calcola embedding query via `EmbeddingClient`
+  - fa nearest-neighbor su FAISS e ritorna top-k
+- Output:
+  - payload con `ok`, `packet`, `query`, `k`, `embedding`, `results`
 
-5. `cpm_compile_context`
-- Purpose: compile structured context (`outline/core_snippets/glossary/risks/citations`) from hits or query response.
-- Why: gives LLM immediately consumable context blocks.
+Nota: il `query` MCP attuale e` focalizzato su packet locali; non espone direttamente il path lazy OCI del builtin `cpm query`.
 
-6. `cpm_diff_packets`
-- Purpose: compare two versions (`drift`, changed sections, risky deltas).
-- Why: excellent for release notes and impact analysis tasks.
+## 3) Flusso completo di una query (CLI core)
 
-### P2 - Operations and reliability
-7. `cpm_policy_explain`
-- Purpose: explain allow/deny/warn decisions for source/token/trust constraints.
+Entry point: `QueryCommand.run()` in `cpm_core/builtins/query.py`
 
-8. `cpm_replay_get`
-- Purpose: fetch deterministic replay payloads for audit and reproducibility.
+### 3.1 Pipeline
+1. Risolve workspace e carica policy/hub settings.
+2. Determina sorgente:
+   - `--packet` locale, oppure
+   - `--source oci://...`, oppure
+   - `--registry ...` (shortcut lazy OCI).
+3. Se c'e` una source OCI:
+   - policy check locale/remota,
+   - `SourceResolver.resolve_and_fetch(source_uri)`,
+   - materializzazione in cache locale.
+4. Risolve retriever (esplicito, suggerito o default).
+5. Risolve trasporto embedding (`--embed-url`, config, fallback).
+6. Esegue retrieval (`_invoke_retriever`), opzionale compile context e policy token.
+7. Produce output `text` o `json`, e replay log.
 
-## Specific Proposal: Connect `lookup` to registry
+## 4) Richiamo query lazy (OCI)
 
-### Target behavior
-`lookup` should support both local and remote inventory with the same output schema.
+### 4.1 Come viene costruita la source
+Metodo: `QueryCommand._resolve_source_uri(...)`
+- Accetta:
+  - URI esplicita `oci://...`
+  - shortcut `--registry` + `--packet`
+- Conversioni principali:
+  - `oci://repo/name@1.2.3` -> ref OCI valida
+  - registry base senza schema + packet -> `oci://<registry>/<packet>`
 
-Suggested CLI extension (`cpm lookup`):
-- `--scope local|registry|both` (default `local` for backward compatibility)
-- `--registry <oci://...|registry/repo>`
-- `--packet <name[@version]>` (optional filter)
-- `--limit <n>`
-- existing `--all-versions`, `--format` retained
+### 4.2 Come avviene la risoluzione lazy
+In `QueryCommand.run()`:
+- chiamata a `SourceResolver.resolve_and_fetch(source_uri)`
+- `OciSource`:
+  - risolve digest remoto
+  - verifica trust (strict/non-strict)
+  - pull artifact in temp
+  - materializza payload in cache CAS locale
+- la query poi usa il packet locale materializzato.
 
-Suggested MCP extension:
-- update MCP `lookup` tool with `scope`, `registry`, `packet`, `limit`
-- return merged list with explicit `origin: local|registry`
+### 4.3 Esempi operativi (lazy query)
+```bash
+cpm query \
+  --packet demo@1.0.0 \
+  --registry harbor.local/cpm \
+  --query "come configuro l'entrypoint?" \
+  --format json
+```
 
-### Resolution strategy
-1. Local branch:
-- Keep current `PacketReader`/`LookupCommand` behavior.
+```bash
+cpm query \
+  --source oci://harbor.local/cpm/demo:latest \
+  --query "quali capability sono supportate?" \
+  -k 8
+```
 
-2. Registry branch:
-- If packet is explicit (`name@version`), resolve via OCI source path and return digest/trust metadata.
-- If packet list/search is requested, use Hub endpoint (preferred) when configured.
-- If hub unavailable and no explicit packet/version, return actionable error (`registry_listing_not_supported_without_hub`).
+```bash
+cpm query \
+  --source oci://harbor.local/cpm/demo@sha256:... \
+  --query "mostrami snippet su autenticazione"
+```
 
-3. Shared output schema:
-- `name`, `version`, `description`, `tags`, `source_uri`, `digest`, `trust_score`, `installed`, `path`, `origin`.
+## 5) Lookup remoto low-token (manifest + 1 blob metadata)
 
-## Implementation Notes
+Builtin: `cpm lookup` in `cpm_core/builtins/lookup.py`
 
-### Reuse existing CPM primitives
-- Source URI resolution: reuse logic equivalent to `QueryCommand._resolve_source_uri`.
-- Trust verification: reuse `OciSource.resolve` and trust report fields.
-- Policy checks: optionally reuse existing policy evaluation flow for consistency.
+### 5.1 Flusso remoto
+1. Risolve `source_uri` (`--source-uri` oppure `--registry + --name + --version/--alias`).
+2. `SourceResolver.lookup_metadata(source_uri)`.
+3. `OciSource.inspect_metadata(...)`:
+   - resolve digest
+   - fetch OCI manifest
+   - selezione layer metadata `application/vnd.cpm.packet.manifest.v1+json`
+   - fetch blob `packet.manifest.json`
+   - validazione/normalizzazione metadata
+   - cache per digest
+4. Applica filtri (`entrypoint`, `kind`, `capability`, `os`, `arch`).
+5. Ritorna `pinned_uri` digest-pinned.
 
-### Refactor suggestion (small)
-- Extract `_resolve_source_uri` from `QueryCommand` into a shared helper module (e.g. `cpm_core/sources/uri.py`) so `query`, `lookup`, and MCP tools use one canonical resolver.
+### 5.2 Esempio lookup remoto
+```bash
+cpm lookup \
+  --registry harbor.local/cpm \
+  --name demo \
+  --alias latest \
+  --entrypoint query \
+  --format json
+```
 
-### MCP server modernization
-Current MCP `query` bypasses `QueryCommand` features. Prefer one of:
-- Option A: invoke query builtin internally and return structured payload directly.
-- Option B: extract reusable query service from `QueryCommand` and call it from both CLI and MCP.
+## 6) Relazione tra MCP tools e lazy query
 
-Option B is cleaner long-term and keeps MCP/CLI parity.
+- MCP `lookup` e MCP `query` (plugin FastMCP) sono orientati al workspace locale (`.cpm`).
+- Il comportamento lazy OCI completo e` oggi implementato nel builtin `cpm query` e nel builtin `cpm lookup` remoto.
+- In pratica:
+  - MCP server copre discovery/query locale rapida.
+  - CLI core copre pipeline estesa con source OCI lazy, trust/policy e metadata OCI ottimizzato.
 
-## Suggested rollout
-1. Milestone 1
-- Extend `lookup` CLI + MCP with `scope` and explicit registry packet resolution (`packet@version`).
+## 7) Chiamata "lazy" consigliata in integrazioni MCP
 
-2. Milestone 2
-- Add hub-backed remote listing/search to `lookup`.
+Per client MCP che vogliono modalità lazy OCI oggi:
+1. Eseguire `cpm lookup` remoto per ottenere `pinned_uri` e metadata minimale.
+2. Eseguire `cpm query --source <pinned_uri> ...` per materializzare on-demand e interrogare.
 
-3. Milestone 3
-- Unify MCP `query` with full CPM query pipeline.
-
-4. Milestone 4
-- Add `inspect_packet`, `policy_explain`, `replay_get`, `diff_packets`.
-
-## Success criteria
-- LLM can discover packets without local install.
-- LLM can run one `cpm_query` tool for both local and registry contexts.
-- Same trust/policy semantics across CLI and MCP.
-- Deterministic outputs and replay metadata available through MCP.
+Questo mantiene lookup leggero (manifest + metadata blob) e posticipa il fetch payload al solo caso di query effettiva.
