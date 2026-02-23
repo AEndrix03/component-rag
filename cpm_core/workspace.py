@@ -162,6 +162,10 @@ class WorkspaceResolver:
         value = self.env.get(key)
         if value:
             return value
+        if key == "cpm_dir":
+            cpm_root = self.env.get("CPM_ROOT")
+            if cpm_root:
+                return cpm_root
         alias = _ENV_KEY_MAP.get(key)
         if alias:
             return self.env.get(alias)
