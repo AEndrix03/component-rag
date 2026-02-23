@@ -1,86 +1,112 @@
-"""Implementation of the MCP tooling surface backed by packet helpers."""
+"""Implementation of the MCP tooling surface backed by remote-first wrappers."""
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from .reader import PacketReader
-from .retriever import EmbedServerError, PacketRetriever
+from .env import apply_settings_to_env, load_settings
+from .remote import evidence_digest as evidence_digest_impl
+from .remote import lookup_remote
+from .remote import plan_from_intent as plan_from_intent_impl
+from .remote import query_remote
 
 mcp = FastMCP(name="context-packet-manager")
 
 
-def _resolve_cpm_dir(override: Optional[str]) -> Path:
-    return Path(override or os.environ.get("RAG_CPM_DIR", ".cpm"))
-
-
 @mcp.tool()
 def lookup(
-    cpm_dir: str | None = None,
-    include_all_versions: bool = False,
+    name: str,
+    version: str | None = None,
+    alias: str | None = "latest",
+    entrypoint: str | None = None,
+    kind: str | None = None,
+    capability: str | list[str] | None = None,
+    os_name: str | None = None,
+    arch: str | None = None,
+    registry: str | None = None,
+    ref: str | None = None,
+    k: int = 3,
+    cpm_root: str | None = None,
 ) -> Dict[str, Any]:
-    reader = PacketReader(_resolve_cpm_dir(cpm_dir))
-    packets = reader.list_packets(include_all_versions=bool(include_all_versions))
-    directory = reader.root.resolve()
-    return {
-        "ok": True,
-        "cpm_dir": str(directory).replace("\\", "/"),
-        "packets": packets,
-        "count": len(packets),
-    }
+    return lookup_remote(
+        name=name,
+        version=version,
+        alias=alias,
+        entrypoint=entrypoint,
+        kind=kind,
+        capability=capability,
+        os_name=os_name,
+        arch=arch,
+        registry=registry,
+        ref=ref,
+        k=k,
+        cpm_root=cpm_root,
+    )
 
 
 @mcp.tool()
 def query(
-    packet: str,
-    query: str,
+    ref: str,
+    q: str,
     k: int = 5,
-    cpm_dir: str | None = None,
-    embed_url: Optional[str] = None,
-    embed_mode: Optional[str] = None,
+    registry: str | None = None,
+    cpm_root: str | None = None,
 ) -> Dict[str, Any]:
-    root = _resolve_cpm_dir(cpm_dir)
-    try:
-        retriever = PacketRetriever(root, packet, embed_url=embed_url, embed_mode=embed_mode)
-    except FileNotFoundError:
-        return {
-            "ok": False,
-            "error": "packet_not_found",
-            "packet": packet,
-            "tried": str(root / packet).replace("\\", "/"),
-        }
-    except EmbedServerError as exc:
-        return {
-            "ok": False,
-            "error": "embed_server_unreachable",
-            "embed_url": exc.embed_url,
-            "embed_mode": exc.embed_mode,
-            "hint": "configure an embedding provider with `cpm embed add ... --set-default` or set RAG_EMBED_URL/RAG_EMBED_MODE",
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": "retrieval_failed",
-            "detail": str(exc),
-        }
+    return query_remote(ref=ref, q=q, k=k, registry=registry, cpm_root=cpm_root)
 
-    return retriever.retrieve(query, k)
+
+@mcp.tool()
+def plan_from_intent(
+    intent: str,
+    constraints: Optional[dict[str, Any]] = None,
+    name_hint: str | None = None,
+    version: str | None = None,
+    registry: str | None = None,
+    cpm_root: str | None = None,
+) -> Dict[str, Any]:
+    return plan_from_intent_impl(
+        intent=intent,
+        constraints=constraints or {},
+        name_hint=name_hint,
+        version=version,
+        registry=registry,
+        cpm_root=cpm_root,
+    )
+
+
+@mcp.tool()
+def evidence_digest(
+    ref: str,
+    question: str,
+    k: int = 6,
+    max_chars: int = 1200,
+    registry: str | None = None,
+    cpm_root: str | None = None,
+) -> Dict[str, Any]:
+    return evidence_digest_impl(
+        ref=ref,
+        question=question,
+        k=k,
+        max_chars=max_chars,
+        registry=registry,
+        cpm_root=cpm_root,
+    )
 
 
 def run_server(
     *,
-    cpm_dir: str | None = None,
-    embed_url: str | None = None,
-    embed_mode: str | None = None,
+    cpm_root: str | None = None,
+    registry: str | None = None,
+    embedding_url: str | None = None,
+    embedding_model: str | None = None,
 ) -> None:
-    if cpm_dir:
-        os.environ["RAG_CPM_DIR"] = cpm_dir
-    if embed_url:
-        os.environ["RAG_EMBED_URL"] = embed_url
-    if embed_mode:
-        os.environ["RAG_EMBED_MODE"] = embed_mode
+    settings = load_settings(
+        cpm_root=cpm_root,
+        registry=registry,
+        embedding_url=embedding_url,
+        embedding_model=embedding_model,
+    )
+    apply_settings_to_env(settings)
     mcp.run()

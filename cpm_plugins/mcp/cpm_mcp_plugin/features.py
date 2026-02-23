@@ -18,22 +18,29 @@ class MCPServeCommand(CPMAbstractCommand):
     def configure(cls, parser: ArgumentParser) -> None:
         parser.add_argument(
             "--cpm-dir",
-            default=".cpm",
-            help="Workspace root where context packets are installed.",
+            default=None,
+            help="Override CPM_ROOT for this process only.",
+        )
+        parser.add_argument(
+            "--registry",
+            default=None,
+            help="Override REGISTRY for this process only.",
         )
         parser.add_argument(
             "--embed-url",
+            default=None,
             help="Embedding server URL to expose to MCP clients.",
         )
         parser.add_argument(
-            "--embeddings-mode",
-            choices=["http", "legacy"],
-            help="Embedding transport mode for query operations.",
+            "--embed-model",
+            default=None,
+            help="Embedding model to use for query-time vectors.",
         )
 
     def run(self, argv: Sequence[str]) -> int:
-        cpm_dir = getattr(argv, "cpm_dir", ".cpm")
+        cpm_dir = getattr(argv, "cpm_dir", None)
+        registry = getattr(argv, "registry", None)
         embed_url = getattr(argv, "embed_url", None)
-        embed_mode = getattr(argv, "embeddings_mode", None)
-        run_server(cpm_dir=cpm_dir, embed_url=embed_url, embed_mode=embed_mode)
+        embed_model = getattr(argv, "embed_model", None)
+        run_server(cpm_root=cpm_dir, registry=registry, embedding_url=embed_url, embedding_model=embed_model)
         return 0
