@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -78,8 +79,24 @@ class OciClient:
         assert_allowlisted(ref_or_digest, self.config.allowlist_domains)
         if not digest:
             raise OciCommandError("missing blob digest")
-        result = self._run(["oras", "blob", "fetch", ref_or_digest, digest])
-        return (result.stdout or "").encode("utf-8")
+        command = ["oras", "blob", "fetch", ref_or_digest, digest]
+        try:
+            result = self._run(command)
+            return (result.stdout or "").encode("utf-8")
+        except OciCommandError:
+            # ORAS v1.3+ expects a single positional argument in the form <name>@<digest>.
+            combined_ref = f"{ref_or_digest}@{digest}"
+            fallback_command = ["oras", "blob", "fetch", combined_ref]
+            try:
+                fallback = self._run(fallback_command)
+                return (fallback.stdout or "").encode("utf-8")
+            except OciCommandError:
+                # Some ORAS builds require writing blob payload to file.
+                with tempfile.TemporaryDirectory(prefix="cpm-oci-blob-") as tmp:
+                    output_path = Path(tmp) / "blob.bin"
+                    output_command = ["oras", "blob", "fetch", "--output", str(output_path), combined_ref]
+                    self._run(output_command)
+                    return output_path.read_bytes()
 
     def discover_referrers(self, ref_or_digest: str) -> list[OciReferrer]:
         assert_allowlisted(ref_or_digest, self.config.allowlist_domains)

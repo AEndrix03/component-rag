@@ -170,3 +170,52 @@ def test_fetch_blob_returns_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
     blob = client.fetch_blob("registry.local/team/repo:1.0.0", "sha256:" + ("f" * 64))
     assert b"cpm.packet.metadata" in blob
+
+
+def test_fetch_blob_falls_back_to_single_arg_oras_syntax(monkeypatch: pytest.MonkeyPatch) -> None:
+    digest = "sha256:" + ("f" * 64)
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        del kwargs
+        calls.append(list(command))
+        if command[:5] == ["oras", "blob", "fetch", "registry.local/team/repo:1.0.0", digest]:
+            return _completed(
+                stderr=(
+                    '"oras blob fetch" requires exactly 1 argument but got 2\n'
+                    "Usage: oras blob fetch <name>@<digest>"
+                ),
+                returncode=1,
+            )
+        if command[:4] == ["oras", "blob", "fetch", f"registry.local/team/repo:1.0.0@{digest}"]:
+            return _completed(stdout="{\"schema\":\"cpm.packet.metadata\"}")
+        return _completed(stderr="unexpected command", returncode=1)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
+    blob = client.fetch_blob("registry.local/team/repo:1.0.0", digest)
+    assert b"cpm.packet.metadata" in blob
+    assert len(calls) >= 2
+    assert calls[-1][:4] == ["oras", "blob", "fetch", f"registry.local/team/repo:1.0.0@{digest}"]
+
+
+def test_fetch_blob_supports_oras_output_required_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    digest = "sha256:" + ("e" * 64)
+
+    def _fake_run(command, **kwargs):
+        del kwargs
+        if command[:5] == ["oras", "blob", "fetch", "registry.local/team/repo:1.0.0", digest]:
+            return _completed(stderr='"oras blob fetch" requires exactly 1 argument but got 2', returncode=1)
+        if command[:4] == ["oras", "blob", "fetch", f"registry.local/team/repo:1.0.0@{digest}"]:
+            return _completed(stderr="either `--output` or `--descriptor` must be provided", returncode=1)
+        if command[:4] == ["oras", "blob", "fetch", "--output"]:
+            output = Path(command[4])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text("{\"schema\":\"cpm.packet.metadata\"}", encoding="utf-8")
+            return _completed(stdout="")
+        return _completed(stderr="unexpected command", returncode=1)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = OciClient(OciClientConfig(allowlist_domains=("registry.local",)))
+    blob = client.fetch_blob("registry.local/team/repo:1.0.0", digest)
+    assert b"cpm.packet.metadata" in blob
