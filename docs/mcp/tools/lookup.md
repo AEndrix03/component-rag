@@ -2,6 +2,14 @@
 
 Remote-first packet lookup optimized for low token/network cost.
 
+## When to use
+
+- discover/select a packet
+- inspect packet metadata (version, alias, capabilities, entrypoints, kind, compat)
+- get a digest-pinned ref for later retrieval
+
+Do not use `query` for metadata-only requests.
+
 ## Behavior
 
 1. Build `source_uri` from `ref` or (`REGISTRY` + `name` + `version/alias`).

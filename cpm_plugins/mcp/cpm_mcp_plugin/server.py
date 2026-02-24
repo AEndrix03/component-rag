@@ -30,6 +30,12 @@ def lookup(
     k: int = 3,
     cpm_root: str | None = None,
 ) -> Dict[str, Any]:
+    """Resolve packet metadata only.
+
+    Use this when the user asks to discover/select a packet or inspect metadata
+    (version, alias, capabilities, entrypoints, kind, compatibility).
+    Do not use `query` for metadata-only requests.
+    """
     return lookup_remote(
         name=name,
         version=version,
@@ -54,6 +60,12 @@ def query(
     registry: str | None = None,
     cpm_root: str | None = None,
 ) -> Dict[str, Any]:
+    """Retrieve semantic evidence snippets from a packet.
+
+    Use this only when the user asks a content question and you need snippets.
+    Prefer passing a digest-pinned `ref` from `lookup.selected.pinned_uri`.
+    Do not use this for packet discovery/version/capability lookup.
+    """
     return query_remote(ref=ref, q=q, k=k, registry=registry, cpm_root=cpm_root)
 
 
@@ -66,6 +78,12 @@ def plan_from_intent(
     registry: str | None = None,
     cpm_root: str | None = None,
 ) -> Dict[str, Any]:
+    """Build a deterministic tool plan from user intent.
+
+    The planner returns `intent_mode`:
+    - `lookup` for metadata/discovery intents
+    - `query` for semantic evidence intents
+    """
     return plan_from_intent_impl(
         intent=intent,
         constraints=constraints or {},
@@ -85,6 +103,10 @@ def evidence_digest(
     registry: str | None = None,
     cpm_root: str | None = None,
 ) -> Dict[str, Any]:
+    """Compact and deduplicate `query` evidence for LLM context windows.
+
+    Use after `query` when token budget is tight.
+    """
     return evidence_digest_impl(
         ref=ref,
         question=question,

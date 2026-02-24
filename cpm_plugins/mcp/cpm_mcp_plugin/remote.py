@@ -209,6 +209,7 @@ def plan_from_intent(
     cpm_root: str | None = None,
 ) -> dict[str, Any]:
     constraints = constraints or {}
+    intent_mode = _intent_mode(intent=intent, constraints=constraints)
     packet_name = name_hint or str(constraints.get("name") or "").strip() or _extract_name_hint(intent)
     if not packet_name:
         return {
@@ -241,7 +242,7 @@ def plan_from_intent(
     scored.sort(key=lambda item: (-item[0], str(item[1].get("pinned_uri") or "")))
     ranked = [item[1] for item in scored]
 
-    if len(scored) >= 2 and scored[0][0] == scored[1][0]:
+    if intent_mode == "query" and len(scored) >= 2 and scored[0][0] == scored[1][0]:
         for idx in range(min(2, len(ranked))):
             probe = query_remote(
                 ref=str(ranked[idx].get("pinned_uri") or ""),
@@ -257,24 +258,34 @@ def plan_from_intent(
 
     selected = []
     for candidate in ranked[:2]:
+        selected_entrypoint = _select_plan_entrypoint(candidate=candidate, constraints=constraints, intent_mode=intent_mode)
         selected.append(
             {
                 "pinned_uri": candidate.get("pinned_uri"),
-                "entrypoint": _select_entrypoint(candidate, constraints),
-                "args_template": {"ref": candidate.get("pinned_uri"), "q": "{question}", "k": 5},
-                "why": _why_candidate(candidate, intent),
+                "entrypoint": selected_entrypoint,
+                "args_template": _build_plan_args_template(
+                    candidate=candidate,
+                    selected_entrypoint=selected_entrypoint,
+                ),
+                "why": _why_candidate(candidate, intent, intent_mode=intent_mode),
             }
         )
     fallbacks = []
     for candidate in ranked[2:4]:
+        selected_entrypoint = _select_plan_entrypoint(candidate=candidate, constraints=constraints, intent_mode=intent_mode)
         fallbacks.append(
             {
                 "pinned_uri": candidate.get("pinned_uri"),
-                "entrypoint": _select_entrypoint(candidate, constraints),
+                "entrypoint": selected_entrypoint,
+                "args_template": _build_plan_args_template(
+                    candidate=candidate,
+                    selected_entrypoint=selected_entrypoint,
+                ),
             }
         )
     return {
         "ok": True,
+        "intent_mode": intent_mode,
         "selected": selected,
         "fallbacks": fallbacks,
         "constraints_applied": constraints,
@@ -719,6 +730,34 @@ def _extract_name_hint(intent: str) -> str | None:
     return token or None
 
 
+def _intent_mode(*, intent: str, constraints: dict[str, Any]) -> str:
+    forced = str(constraints.get("mode") or "").strip().lower()
+    if forced in {"lookup", "query"}:
+        return forced
+
+    requested_entrypoint = str(constraints.get("entrypoint") or "").strip().lower()
+    if requested_entrypoint in {"lookup", "query"}:
+        return requested_entrypoint
+
+    lowered_intent = str(intent).lower()
+    lookup_score = 0
+    query_score = 0
+
+    if any(token in lowered_intent for token in ("lookup", "metadata", "catalog", "latest", "version", "entrypoint", "capabilit", "tag", "alias")):
+        lookup_score += 2
+    if any(token in lowered_intent for token in ("search", "question", "answer", "snippet", "context", "where", "how", "why", "what")):
+        query_score += 1
+
+    for key in ("kind", "capability", "os", "arch", "version", "alias"):
+        value = constraints.get(key)
+        if value:
+            lookup_score += 1
+
+    if query_score > lookup_score:
+        return "query"
+    return "lookup"
+
+
 def _score_candidate_from_intent(*, candidate: dict[str, Any], intent: str, constraints: dict[str, Any]) -> int:
     score = 0
     lowered_intent = intent.lower()
@@ -734,6 +773,19 @@ def _score_candidate_from_intent(*, candidate: dict[str, Any], intent: str, cons
     return score
 
 
+def _select_plan_entrypoint(*, candidate: dict[str, Any], constraints: dict[str, Any], intent_mode: str) -> str:
+    if intent_mode == "lookup":
+        return "lookup"
+    selected = _select_entrypoint(candidate, constraints)
+    return selected or "query"
+
+
+def _build_plan_args_template(*, candidate: dict[str, Any], selected_entrypoint: str) -> dict[str, Any]:
+    if selected_entrypoint == "lookup":
+        return {"ref": candidate.get("pinned_uri"), "k": 3}
+    return {"ref": candidate.get("pinned_uri"), "q": "{question}", "k": 5}
+
+
 def _select_entrypoint(candidate: dict[str, Any], constraints: dict[str, Any]) -> str | None:
     requested = str(constraints.get("entrypoint") or "").strip()
     entrypoints = [str(item) for item in list(candidate.get("entrypoints") or [])]
@@ -742,8 +794,8 @@ def _select_entrypoint(candidate: dict[str, Any], constraints: dict[str, Any]) -
     return entrypoints[0] if entrypoints else None
 
 
-def _why_candidate(candidate: dict[str, Any], intent: str) -> str:
+def _why_candidate(candidate: dict[str, Any], intent: str, *, intent_mode: str) -> str:
     name = str(candidate.get("name") or "")
     version = str(candidate.get("version") or "")
     caps = ", ".join(str(item) for item in list(candidate.get("capabilities") or [])[:3]) or "no capabilities"
-    return f"selected {name}@{version} for intent '{intent[:64]}' with capabilities [{caps}]"
+    return f"selected {name}@{version} for {intent_mode} intent '{intent[:64]}' with capabilities [{caps}]"

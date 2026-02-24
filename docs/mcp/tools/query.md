@@ -2,6 +2,13 @@
 
 Cache-first query with lazy OCI materialization on miss.
 
+## When to use
+
+- answer a semantic/content question using packet snippets
+- retrieve evidence after `lookup` selected a packet (`selected.pinned_uri`)
+
+Do not use `query` to discover packets or inspect metadata (use `lookup`).
+
 ## Behavior
 
 1. Resolve `source_uri` from `ref` (or `REGISTRY + ref`).

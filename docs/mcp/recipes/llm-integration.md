@@ -11,8 +11,13 @@ This keeps lookup ultra-light and defers payload fetch to actual query.
 ## Planner Sequence
 
 1. `plan_from_intent(intent, constraints)`
-2. execute first `selected` item (`query` using `args_template`)
+2. read `intent_mode`
+3. execute first `selected` item using `entrypoint` + `args_template`
 3. if needed, run `evidence_digest` for compact context.
+
+Planner mode guidance:
+- `intent_mode=lookup`: metadata/discovery intent; execute `lookup`.
+- `intent_mode=query`: semantic retrieval intent; execute `query`.
 
 ## Notes
 

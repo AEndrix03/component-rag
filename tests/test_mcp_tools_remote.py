@@ -197,6 +197,40 @@ def test_plan_and_evidence_tools_are_deterministic(monkeypatch) -> None:
     assert len(digest["evidence"]) == 2
 
 
+def test_plan_from_intent_prefers_lookup_for_metadata_intent(monkeypatch) -> None:
+    def _fake_lookup_remote(**kwargs):
+        return {
+            "ok": True,
+            "candidates": [
+                {
+                    "pinned_uri": "oci://registry.local/project/demo@sha256:" + ("4" * 64),
+                    "name": "demo",
+                    "version": "1.2.3",
+                    "entrypoints": ["query"],
+                    "kind": "knowledge",
+                    "capabilities": ["rag", "search"],
+                }
+            ],
+        }
+
+    def _query_should_not_run(**kwargs):
+        raise AssertionError("query_remote should not run for lookup-oriented planning")
+
+    monkeypatch.setattr(remote, "lookup_remote", _fake_lookup_remote)
+    monkeypatch.setattr(remote, "query_remote", _query_should_not_run)
+
+    plan = remote.plan_from_intent(
+        intent="lookup metadata for packet:demo latest version and capabilities",
+        constraints={"alias": "latest"},
+    )
+
+    assert plan["ok"] is True
+    assert plan["intent_mode"] == "lookup"
+    assert len(plan["selected"]) == 1
+    assert plan["selected"][0]["entrypoint"] == "lookup"
+    assert plan["selected"][0]["args_template"]["ref"].startswith("oci://registry.local/project/demo@sha256:")
+
+
 def test_run_server_applies_env_overrides(monkeypatch) -> None:
     run_log = []
 
