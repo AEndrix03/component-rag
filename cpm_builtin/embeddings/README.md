@@ -753,6 +753,10 @@ dims: 768  # Ensures response matches expected dimension
 # Solution: Start embedding server or check URL
 ```
 
+Note:
+- CPM treats any HTTP response as "reachable" during preflight health checks.
+- Some adapters return `405/501` to `OPTIONS /v1/embeddings`; this is valid if `POST /v1/embeddings` works.
+
 #### Timeout
 
 ```python

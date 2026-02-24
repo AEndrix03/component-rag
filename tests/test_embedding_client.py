@@ -70,8 +70,18 @@ class _EmbeddingHandler(BaseHTTPRequestHandler):
         return
 
 
-def _start_server() -> tuple[_ThreadedServer, str]:
-    server = _ThreadedServer(("127.0.0.1", 0), _EmbeddingHandler)
+class _EmbeddingHandlerOptionsNotImplemented(_EmbeddingHandler):
+    def do_OPTIONS(self) -> None:
+        if self.path == "/v1/embeddings":
+            self.send_response(501)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.send_error(404)
+
+
+def _start_server(handler_cls: type[BaseHTTPRequestHandler] = _EmbeddingHandler) -> tuple[_ThreadedServer, str]:
+    server = _ThreadedServer(("127.0.0.1", 0), handler_cls)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, f"http://127.0.0.1:{server.server_port}"
@@ -98,6 +108,24 @@ def test_embedding_client_http_mode_uses_openai_endpoint() -> None:
         assert isinstance(vectors, np.ndarray)
         assert vectors.shape == (2, 2)
         assert vectors.dtype == np.float32
+    finally:
+        _stop_server(server)
+
+
+def test_embedding_client_health_accepts_options_not_implemented() -> None:
+    server, base_url = _start_server(_EmbeddingHandlerOptionsNotImplemented)
+    try:
+        client = EmbeddingClient(base_url=base_url, mode="http", timeout_s=1.0)
+        assert client.health() is True
+        vectors = client.embed_texts(
+            ["a"],
+            model_name="test-model",
+            max_seq_length=128,
+            normalize=False,
+            dtype="float32",
+            show_progress=False,
+        )
+        assert vectors.shape == (1, 2)
     finally:
         _stop_server(server)
 

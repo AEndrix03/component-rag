@@ -45,9 +45,11 @@ class EmbeddingClient:
 
     def health(self) -> bool:
         try:
-            response = requests.options(self._http_endpoint, timeout=2.0)
-            return response.status_code < 500
-        except Exception:
+            requests.options(self._http_endpoint, timeout=2.0)
+            # Any HTTP response means the endpoint is reachable.
+            # Some adapters return 501/405 for OPTIONS while still serving POST /v1/embeddings.
+            return True
+        except requests.RequestException:
             return False
 
     def embed_texts(
